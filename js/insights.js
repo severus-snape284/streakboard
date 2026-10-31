@@ -144,7 +144,7 @@ function prevPeriod(key, frequency) {
  * habit's reset frequency) with at least one + click. The current period counts once
  * it has a click; until then the streak runs through the previous period.
  */
-export function habitStats(habit, tz, dayStart, today) {
+export function habitStats(habit, tz, dayStart, today, target = 1) {
   const freq = habit.frequency || 'daily';
   const ups = {};
   let prevValue = null;
@@ -158,15 +158,107 @@ export function habitStats(habit, tz, dayStart, today) {
   }
   const cur = periodKey(today, freq);
   const thisPeriod = ups[cur] || 0;
+  const hit = (k) => (ups[k] || 0) >= target;
+  // The current period counts once the target is met; until then the streak runs through the previous one.
   let streak = 0;
-  let p = thisPeriod ? cur : prevPeriod(cur, freq);
-  while (ups[p]) { streak++; p = prevPeriod(p, freq); }
+  let p = hit(cur) ? cur : prevPeriod(cur, freq);
+  while (hit(p)) { streak++; p = prevPeriod(p, freq); }
   let best = 0, run = 0, last = null;
-  for (const k of Object.keys(ups).sort()) {
+  for (const k of Object.keys(ups).filter(hit).sort()) {
     run = last && prevPeriod(k, freq) === last ? run + 1 : 1;
     best = Math.max(best, run);
     last = k;
   }
   const unit = freq === 'weekly' ? 'week' : freq === 'monthly' ? 'month' : 'day';
-  return { streak, best: Math.max(best, streak), thisPeriod, unit, ups };
+  return { streak, best: Math.max(best, streak), thisPeriod, target, unit, ups };
+}
+
+// ---------- timing, plans, reasons ----------
+
+const DAY_MS = 86400000;
+
+/** Minutes since the Habitica day start (0..1439) for a timestamp. */
+export function minutesIntoDay(ts, tz, dayStart) {
+  const local = (((Number(ts) - tz * 60000) % DAY_MS) + DAY_MS) % DAY_MS;
+  return (Math.floor(local / 60000) - dayStart * 60 + 1440) % 1440;
+}
+
+/**
+ * Median time of day this daily gets ticked, from recent check-offs (minutes since
+ * day start), or null with fewer than 3 samples. Late "record yesterday" ticks made
+ * before that day's cron are excluded; they don't reflect when you do the habit.
+ */
+export function usualTime(task, { tz, dayStart, cronStart = {} }, limit = 30) {
+  const mins = [];
+  for (const h of task.history || []) {
+    if (!h.completed) continue;
+    const ts = Number(h.date);
+    const k = dayKey(ts, tz, dayStart);
+    if (cronStart[k] && ts < cronStart[k]) continue;
+    mins.push(minutesIntoDay(ts, tz, dayStart));
+  }
+  const recent = mins.slice(-limit).sort((a, b) => a - b);
+  if (recent.length < 3) return null;
+  return recent[Math.floor(recent.length / 2)];
+}
+
+export function fmtClock(minSinceDayStart, dayStart) {
+  const m = (minSinceDayStart + dayStart * 60) % 1440;
+  const h = Math.floor(m / 60), mm = m % 60;
+  // Round to the nearest 15 minutes; it's an estimate.
+  const q = Math.round(mm / 15) * 15;
+  const hh = (h + (q === 60 ? 1 : 0)) % 24;
+  const ap = hh < 12 ? 'AM' : 'PM';
+  const h12 = hh % 12 || 12;
+  return `${h12}${q % 60 ? ':' + String(q % 60).padStart(2, '0') : ''} ${ap}`;
+}
+
+/** Due, not done, and more than an hour past the usual time. */
+export function pastUsualTime(task, nowMin) {
+  return task.usual != null && task.isDue && !task.completed && nowMin > task.usual + 60;
+}
+
+/**
+ * Date (day key) the next milestone is reached if no due day is missed, using
+ * Habitica's own nextDue list; extrapolates for simple every-N-days schedules.
+ */
+export function milestoneForecast(task, target, today, tz) {
+  if (!target || target <= task.streak) return null;
+  const need = target - task.streak;
+  const dates = [];
+  if (task.isDue && !task.completed) dates.push(today);
+  for (const d of task.nextDue || []) {
+    const t = Date.parse(d);
+    if (isNaN(t)) continue;
+    const k = dayKey(t, tz, 0); // nextDue values are local midnights
+    if (k > today && !dates.includes(k)) dates.push(k);
+  }
+  dates.sort();
+  if (need <= dates.length) return dates[need - 1];
+  if (task.frequency === 'daily') {
+    const last = dates.length ? dates[dates.length - 1] : today;
+    return addDays(last, (need - dates.length) * (task.everyX || 1));
+  }
+  return null;
+}
+
+export const MISS_REASONS = ['Forgot', 'No time', 'Tired', 'Sick', 'Travel', 'Rest day', 'Other'];
+
+/** Missed days in the last `days` days that have no reason recorded yet (newest first). */
+export function unexplainedMisses(task, reasons = {}, today, days = 14) {
+  const from = addDays(today, -days);
+  return Object.entries(task.days || {})
+    .filter(([k, v]) => v === 'missed' && k >= from && k < today && !reasons[k])
+    .map(([k]) => k)
+    .sort()
+    .reverse();
+}
+
+/** Reason counts across tasks since `from`, most common first. */
+export function reasonStats(reasonsByTask = {}, from = '0000-00-00') {
+  const counts = {};
+  for (const byDay of Object.values(reasonsByTask)) {
+    for (const [k, r] of Object.entries(byDay || {})) if (k >= from) counts[r] = (counts[r] || 0) + 1;
+  }
+  return Object.entries(counts).map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n);
 }

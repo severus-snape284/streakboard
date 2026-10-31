@@ -15,6 +15,7 @@ const state = {
   badge: localStorage.getItem('sb.badge') === '1',
   persisted: null,
   pending: new Set(), // task ids with a write in flight
+  prefs: { cues: {}, reasons: {}, targets: {} }, // user-entered, device-local
 };
 
 // ---------- routing ----------
@@ -246,6 +247,22 @@ app.addEventListener('click', async (ev) => {
   else if (action === 'habit') plusHabit(id);
   else if (action === 'cron') startNewDay();
   else if (action === 'badge') toggleBadge();
+  else if (action === 'reason') {
+    const { day, reason } = btn.dataset;
+    state.prefs = await store.updatePrefs((p) => { (p.reasons[id] ||= {})[day] = reason; });
+    toast(`Noted: ${reason}`);
+    render();
+  } else if (action === 'target') {
+    const h = state.view?.habits.find((x) => x.id === id);
+    const unit = { weekly: 'week', monthly: 'month' }[h?.frequency] || 'day';
+    const cur = state.prefs.targets[id] || 1;
+    const ans = prompt(`Goal for "${h?.text}": how many times per ${unit}?`, String(cur));
+    if (ans == null) return;
+    const n = Math.round(Number(ans));
+    if (!(n >= 1 && n <= 99)) { toast('Enter a number from 1 to 99'); return; }
+    state.prefs = await store.updatePrefs((p) => { if (n === 1) delete p.targets[id]; else p.targets[id] = n; });
+    render();
+  }
   else if (action === 'toggle-token') {
     const i = document.getElementById('tok');
     i.type = i.type === 'password' ? 'text' : 'password';
@@ -267,6 +284,15 @@ app.addEventListener('click', async (ev) => {
 });
 
 app.addEventListener('submit', async (ev) => {
+  if (ev.target.id === 'cue-form') {
+    ev.preventDefault();
+    const id = ev.target.dataset.id;
+    const cue = String(new FormData(ev.target).get('cue') || '').trim();
+    state.prefs = await store.updatePrefs((p) => { if (cue) p.cues[id] = cue; else delete p.cues[id]; });
+    toast(cue ? 'Plan saved' : 'Plan cleared');
+    render();
+    return;
+  }
   if (ev.target.id !== 'creds-form') return;
   ev.preventDefault();
   const f = new FormData(ev.target);
@@ -295,6 +321,7 @@ app.addEventListener('change', async (ev) => {
     const json = JSON.parse(await ev.target.files[0].text());
     const r = await store.importBackup(json);
     state.view = await store.loadView();
+    state.prefs = await store.getPrefs();
     toast(`Imported ${r.snapshots} snapshots for ${r.tasks} dailies`);
   } catch (e) {
     toast(e.message || 'Import failed', 4000);
@@ -359,7 +386,9 @@ async function exportBackup() {
 async function boot() {
   window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
   render();
-  try { state.view = await store.loadView(); } catch (e) { console.warn('cache load failed', e); }
+  try {
+    [state.view, state.prefs] = await Promise.all([store.loadView(), store.getPrefs()]);
+  } catch (e) { console.warn('cache load failed', e); }
   render(); // first paint from cache
   store.requestPersistence().then((p) => { state.persisted = p; }).catch(() => {});
   if (store.getCreds()) doRefresh({ force: true, quiet: !!state.view });

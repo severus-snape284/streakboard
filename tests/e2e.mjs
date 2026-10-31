@@ -177,6 +177,28 @@ await page.waitForFunction(() => { const b = document.querySelector('.checklist 
 await page.waitForTimeout(200);
 check(posts.some((p) => p.endsWith('/tasks/bbbb-2/checklist/cl-2/score')), 'checklist item toggle sends POST');
 
+// 5b2. Plan (when/where) shows on the home row; miss reasons
+await page.goto(BASE + '#/t/cccc-3');
+await page.waitForSelector('#cue-form');
+check((await page.textContent('#cue-form')).includes('usually tick this around'), 'detail shows usual time');
+check(/reach 21 days on/i.test(await page.textContent('.card')) || /reach 7 days on/i.test(await page.textContent('body')), 'milestone forecast shown');
+await page.fill('#cue-form input[name=cue]', 'After lunch, on the balcony');
+await page.click('#cue-form button[type=submit]');
+await page.waitForFunction(() => document.getElementById('toast').textContent.includes('Plan saved'));
+check(await page.locator('.why .chip').count() > 0, 'unexplained misses ask why');
+const before = await page.locator('.why-day').count();
+await page.locator('.why-day').first().locator('.chip', { hasText: 'Forgot' }).click();
+await page.waitForFunction((n) => document.querySelectorAll('.why-day').length === n - 1, before);
+check((await page.textContent('body')).includes('Miss reasons logged'), 'miss reason recorded');
+await shot('03a-detail-plan');
+await page.click('#nav a[data-nav=home]');
+await page.waitForSelector('.row-cue');
+check((await page.textContent('.list .row:has-text("Meditate") .row-cue')).includes('After lunch'), 'plan shows under the daily on home');
+await page.click('[data-sort=time]');
+check((await page.locator('[data-sort=time]').getAttribute('aria-pressed')) === 'true', 'time sort selectable');
+check(/~\d/.test(await page.textContent('.list')), 'time sort shows usual times');
+await page.click('[data-sort=streak]');
+
 // 5c. Habits tab
 await page.click('#nav a[data-nav=habits]');
 await page.waitForSelector('.check.plus');
@@ -187,6 +209,10 @@ await water.locator('.check.plus').click();
 await page.waitForFunction(() => [...document.querySelectorAll('.list .row')].some((r) => r.textContent.includes('Drink water') && r.textContent.includes('1× today')));
 check((await water.locator('.row-streak').textContent()).includes('5'), '+1 extends habit streak to 5');
 check(await noHScroll(), 'habits: no horizontal scroll');
+page.once('dialog', (d) => d.accept('3'));
+await page.locator('.list .row', { hasText: 'Gym' }).locator('[data-action=target]').click();
+await page.waitForFunction(() => document.body.textContent.includes('Goal: 3/week'));
+check((await page.textContent('.list .row:has-text("Gym")')).includes('1/3 this week'), 'habit goal shows progress 1/3');
 await shot('03b-habits');
 
 // 5d. Insights tab
@@ -195,6 +221,8 @@ await page.waitForSelector('.bars');
 check(await page.locator('.bar').count() === 7, 'insights: weekday bars');
 check(/\d+%/.test(await page.textContent('.hero-num')), 'insights: completion rate shown');
 check(await page.locator('.rates li').count() >= 4, 'insights: per-daily rates');
+check(await page.locator('.heat i.done').count() > 0, 'insights: consistency calendar');
+check((await page.textContent('body')).includes('Why you miss'), 'insights: miss reasons card');
 await page.click('[data-period="30"]');
 check((await page.textContent('.hero-label b')).includes('30 days'), 'insights: 30-day toggle');
 check(await noHScroll(), 'insights: no horizontal scroll');
@@ -211,6 +239,7 @@ const [download] = await Promise.all([page.waitForEvent('download'), page.click(
 const backup = JSON.parse(fs.readFileSync(await download.path(), 'utf8'));
 check(backup.app === 'streakboard' && backup.observed.length === 6, 'export contains observed records');
 check(!JSON.stringify(backup).includes('test-token'), 'export does not contain the API token');
+check(backup.prefs?.cues?.['cccc-3']?.includes('After lunch') && backup.prefs?.targets?.['h-2'] === 3, 'export includes plans and goals');
 
 // 8. Rate limit handling
 await page.click('#nav a[data-nav=home]');

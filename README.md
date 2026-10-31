@@ -16,6 +16,12 @@ Keep using the official Habitica app to check things off. Streakboard is the sco
 - **Insights tab**: 7 / 30-day completion rate per daily (weakest first), trend vs the previous period, weakest weekday
 - **Habits tab**: positive habits with a +1 button and day/week/month streaks (per the habit's reset period)
 - **Milestone celebrations** at 7, 21, 30, 66, 100 and 365 days
+- **Your usual time** for each daily, learned from when you actually tick it. A **Time** sort turns the list into a plan for the day, and a gentle flag appears when a daily is an hour past its usual time
+- **When / where plan** for each daily ("After morning coffee, at my desk"), shown under its name
+- **Why did you miss?** Tag a miss with one tap; Insights shows your most common reasons with a tip
+- **Habit goals** (e.g. Gym 3× a week); a habit's streak counts periods where you hit the goal
+- **Milestone forecast**: the date you'll reach the next milestone if you keep going
+- **Consistency calendar** on Insights: all done / some / none, day by day
 - Optional **app icon badge** with the number of dailies still due (iOS 16.4+, needs notification permission)
 - Pull-to-refresh, opens offline, last-updated timestamp
 - Export / Import a JSON backup
@@ -73,6 +79,8 @@ either way. It would just add a server to run and one more party that sees your 
   entry, and each cron adds a `completed: false` entry (with `isDue`) only for dailies that weren't done.
   Check-offs made in Habitica's "record yesterday's activity" prompt count for the previous day.
 - **Breaks** come from two places: misses found in history, and drops in the streak seen between fetches.
+- Your plans, miss reasons and habit goals are stored only on this device and included in Export/Import.
+  "Delete local streak history" keeps them.
 - Days Streakboard has worked out are saved in IndexedDB. Habitica eventually compresses old history,
   but what Streakboard has already seen stays.
 

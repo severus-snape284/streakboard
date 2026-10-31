@@ -6,12 +6,17 @@ built yet. Read all of it before starting.
 
 ## Status
 
-- **Phase 0 done, v1 + v2 built and pushed (2026-10-31).** Pages deploy needs the owner to set
-  Settings → Pages → Source = GitHub Actions (first run failed with "Get Pages site failed").
+- **Phase 0 done, v1, v2 and v2.1 built and live (2026-10-31):** https://severus-snape284.github.io/streakboard/
 - v2 + consistency extras shipped (owner asked for "all additions that help me be consistent"): tick
   dailies/checklists with optimistic UI, streak rescue + `POST /cron`, countdown/progress ring,
   don't-miss-twice, perfect days, Insights tab, Habits tab, milestone celebrations, app badge.
   Web Push reminders were skipped: they need a push server.
+- v2.1 (owner: "start on the next improvements"): usual time per daily (median check-off time,
+  late ticks excluded) + Time sort + "usually done by" flag; when/where plan per daily; miss-reason
+  tagging + Insights card; habit goals (streak = periods meeting goal); milestone forecast from
+  `nextDue`; overall consistency calendar. User-entered data lives in IndexedDB kv `prefs`
+  ({cues, reasons, targets}), is exported/imported, and survives "Delete local streak history".
+- Pages is enabled and deploying (owner set Source = GitHub Actions).
 - Verified in Habitica source (`website/server/libs/cron.js`, `common/script/ops/scoreTask.js`):
   GET requests do NOT run cron (only `POST /cron`); score up = streak+1 + history push;
   score down = streak−1 + removes last history entry.

@@ -15,6 +15,7 @@
   --cell-notdue: #2a2a34;
   --cell-missed: #6b2a2f;
   --cell-done: #ff8a3d;
+  --cell-part: #8a4a22;
   --radius: 18px;
   --nav-h: 64px;
   --safe-t: env(safe-area-inset-top, 0px);
@@ -42,6 +43,7 @@
     --cell-notdue: #dcdbd4;
     --cell-missed: #f1b9b9;
     --cell-done: #f0701e;
+    --cell-part: #f7c39e;
     color-scheme: light;
   }
 }
@@ -344,3 +346,19 @@ body.setup #nav { display: none; }
 .celebrate-card .btn { margin-top: 16px; }
 @keyframes pop { from { transform: scale(.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @keyframes flicker { 50% { transform: scale(1.08) rotate(-3deg); } }
+
+/* v2.1: plans, timing, reasons, goals */
+.row-cue { font-size: 13px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pill.late { color: var(--flame-2); background: color-mix(in srgb, var(--flame-2) 14%, transparent); }
+.pill-btn { border: 0; cursor: pointer; min-height: 28px; font: inherit; font-size: 12px; font-weight: 650; }
+.heat i.part { background: var(--cell-part); }
+.why-day + .why-day { margin-top: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.chip {
+  min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.chip:active { background: color-mix(in srgb, var(--flame) 25%, var(--surface-2)); }
+.small-btn { width: auto; min-height: 50px; flex: none; }
+.seg button { font-size: 13px; }
+#cue-form input { font-family: inherit; }

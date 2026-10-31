@@ -167,3 +167,42 @@ test('unticking today is not remembered from history', () => {
   const v = buildView({ user, dailies: t, fetchedAt: NOW }, snapshots, observed, NOW + 60000);
   assert.equal(v.tasks.find((x) => x.text === 'Read 20 pages').days['2026-10-31'], 'due');
 });
+
+test('usual time of day from check-offs, excluding late ticks', () => {
+  const at = (iso) => ({ date: Date.parse(iso), completed: true, isDue: true });
+  const t = { history: [at('2026-10-27T14:30:00Z'), at('2026-10-28T14:45:00Z'), at('2026-10-29T15:00:00Z'), at('2026-10-31T03:20:00Z')] };
+  // Last entry is a late tick at 08:50 local, made before the 2026-10-31 cron at 03:30Z.
+  const cronStart = { '2026-10-31': Date.parse('2026-10-31T03:30:00Z') };
+  const u = I.usualTime(t, { tz: TZ, dayStart: DAY_START, cronStart });
+  assert.equal(I.fmtClock(u, DAY_START), '8:15 PM');
+  assert.equal(I.usualTime({ history: t.history.slice(0, 2) }, { tz: TZ, dayStart: DAY_START }), null);
+  assert.equal(I.pastUsualTime({ usual: u, isDue: true, completed: false }, u + 61), true);
+  assert.equal(I.pastUsualTime({ usual: u, isDue: true, completed: true }, u + 61), false);
+});
+
+test('milestone forecast uses nextDue and extrapolates simple schedules', () => {
+  const daily = { streak: 5, isDue: true, completed: false, frequency: 'daily', everyX: 1, nextDue: ['2026-10-31T18:30:00.000Z'] };
+  assert.equal(I.milestoneForecast(daily, 7, '2026-10-31', TZ), '2026-11-01'); // today + Nov 1
+  assert.equal(I.milestoneForecast({ ...daily, completed: true, streak: 6 }, 7, '2026-10-31', TZ), '2026-11-01');
+  assert.equal(I.milestoneForecast(daily, 21, '2026-10-31', TZ), '2026-11-15');
+  const weekly = { streak: 5, isDue: false, completed: false, frequency: 'weekly', nextDue: ['2026-11-07T18:30:00.000Z', '2026-11-14T18:30:00.000Z'] };
+  assert.equal(I.milestoneForecast(weekly, 7, '2026-10-31', TZ), '2026-11-15');
+  assert.equal(I.milestoneForecast(weekly, 21, '2026-10-31', TZ), null);
+});
+
+test('habit goals change what counts toward the streak', () => {
+  const { habits } = scenario('2026-10-31');
+  const gym = habits[1]; // one + in each of the last 3 weeks
+  assert.equal(I.habitStats(gym, TZ, DAY_START, '2026-10-31', 1).streak, 3);
+  assert.equal(I.habitStats(gym, TZ, DAY_START, '2026-10-31', 2).streak, 0);
+});
+
+test('miss reasons: unexplained misses and stats; prefs merge', async () => {
+  const t = { days: { '2026-10-25': 'missed', '2026-10-28': 'missed', '2026-10-30': 'done', '2026-10-10': 'missed' } };
+  assert.deepEqual(I.unexplainedMisses(t, { '2026-10-25': 'Tired' }, '2026-10-31'), ['2026-10-28']);
+  const stats = I.reasonStats({ a: { '2026-10-25': 'Tired', '2026-10-28': 'Forgot' }, b: { '2026-10-29': 'Forgot', '2026-09-01': 'Sick' } }, '2026-10-01');
+  assert.deepEqual(stats, [{ reason: 'Forgot', n: 2 }, { reason: 'Tired', n: 1 }]);
+  const { mergePrefs } = await import('../js/model.js');
+  const m = mergePrefs({ cues: { a: 'mine' }, reasons: { a: { d1: 'Tired' } } }, { cues: { a: 'theirs', b: 'x' }, reasons: { a: { d2: 'Sick' } }, targets: { h: 3 } });
+  assert.deepEqual(m, { cues: { a: 'mine', b: 'x' }, targets: { h: 3 }, reasons: { a: { d1: 'Tired', d2: 'Sick' } } });
+});

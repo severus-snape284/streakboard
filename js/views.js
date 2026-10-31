@@ -3,11 +3,14 @@ import { sortTasks, heroStats, atRisk, statusOf, milestoneFor, nextMilestone, MI
 import {
   missedLastTime, dayRollup, perfectStreak, periodStats, weekdayStats, weakestWeekday,
   weekdayName, weekdayLong, habitStats, nextRollover, fmtDuration,
+  fmtClock, pastUsualTime, minutesIntoDay, milestoneForecast, unexplainedMisses, reasonStats, MISS_REASONS,
 } from './insights.js';
 import { describeSchedule } from './model.js';
 import { esc, relTime, fmtDay, pct, FLAME, REFRESH_ICON, CHECK_ICON, PLUS_ICON, ring } from './ui.js';
 
-export const APP_VERSION = '2.0.0';
+export const APP_VERSION = '2.1.0';
+
+const nowMin = (ctx) => minutesIntoDay(Date.now(), ctx.tz, ctx.ds);
 
 const link = (id) => `#/t/${encodeURIComponent(id)}`;
 
@@ -55,7 +58,9 @@ function statusPill(t, ctx) {
   if (s === 'done') return `<span class="pill done">✓ Done ${esc(d)}</span>`;
   if (s === 'due') {
     if (missedLastTime(t, ctx.cronDay)) return '<span class="pill risk">Don\'t miss twice</span>';
-    return atRisk(t) ? '<span class="pill risk">At risk</span>' : `<span class="pill due">Due ${esc(d)}</span>`;
+    if (atRisk(t)) return '<span class="pill risk">At risk</span>';
+    if (!ctx.stale && pastUsualTime(t, nowMin(ctx))) return `<span class="pill late">Usually done by ${esc(fmtClock(t.usual, ctx.ds))}</span>`;
+    return `<span class="pill due">Due ${esc(d)}</span>`;
   }
   return `<span class="pill">Not due ${esc(d)}</span>`;
 }
@@ -67,6 +72,8 @@ function checkButton(t, pending, big = false) {
 }
 
 function rowView(t, state) {
+  const ctx = state.view.ctx;
+  const cue = state.prefs.cues[t.id];
   const ms = milestoneFor(t.streak);
   const cls = ['row', statusOf(t)];
   if (!t.streak) cls.push('zero');
@@ -78,11 +85,18 @@ function rowView(t, state) {
     <a class="row-link" href="${link(t.id)}">
       <div class="row-body">
         <div class="row-title">${esc(t.text)}</div>
-        <div class="row-meta">${statusPill(t, state.view.ctx)}${ms ? `<span class="pill ms">${ms}-day</span>` : ''}${cl}<span>best <span class="num">${t.best}</span></span></div>
+        ${cue ? `<div class="row-cue">→ ${esc(cue)}</div>` : ''}
+        <div class="row-meta">${statusPill(t, ctx)}${state.sort === 'time' && t.usual != null ? `<span>~${esc(fmtClock(t.usual, ctx.ds))}</span>` : ''}${ms ? `<span class="pill ms">${ms}-day</span>` : ''}${cl}<span>best <span class="num">${t.best}</span></span></div>
       </div>
       <div class="row-streak num" aria-label="${t.streak} day streak">${FLAME}${t.streak}</div>
     </a>
   </li>`;
+}
+
+/** Day plan order: open dailies by usual time (unknown last), then done, then not due. */
+function sortByTime(tasks) {
+  const rank = (t) => (t.isDue && !t.completed ? 0 : t.completed ? 1 : 2);
+  return [...tasks].sort((a, b) => rank(a) - rank(b) || (a.usual ?? 9999) - (b.usual ?? 9999) || a.text.localeCompare(b.text));
 }
 
 export function homeView(state) {
@@ -105,8 +119,8 @@ export function homeView(state) {
   const twice = sortTasks(tasks.filter((t) => missedLastTime(t, ctx.cronDay)), 'streak');
   const risky = sortTasks(tasks.filter((t) => atRisk(t) && !missedLastTime(t, ctx.cronDay)), 'streak');
   const left = ctx.stale ? null : nextRollover(ctx.today, ctx.tz, ctx.ds) - Date.now();
-  const sorted = sortTasks(tasks, state.sort);
-  const seg = [['streak', 'Streak'], ['due', 'Due'], ['name', 'Name']]
+  const sorted = state.sort === 'time' ? sortByTime(tasks) : sortTasks(tasks, state.sort);
+  const seg = [['streak', 'Streak'], ['due', 'Due'], ['time', 'Time'], ['name', 'Name']]
     .map(([k, l]) => `<button data-sort="${k}" aria-pressed="${state.sort === k}">${l}</button>`).join('');
   const bannerItem = (t) => `<li>${checkButton(t, state.pending.has(t.id))}<a href="${link(t.id)}"><span>${esc(t.text)}</span><span class="num">${FLAME}${t.streak}</span></a></li>`;
 
@@ -176,6 +190,11 @@ export function detailView(state, id) {
   const reached = MILESTONES.filter((m) => t.best >= m);
   const weak = weakestWeekday(weekdayStats([t.days]));
   const last30 = periodStats([t], v.ctx.cronDay, 30);
+  const forecast = milestoneForecast(t, next, v.ctx.cronDay, v.ctx.tz);
+  const reasons = state.prefs.reasons[t.id] || {};
+  const misses = unexplainedMisses(t, reasons, v.ctx.cronDay).slice(0, 3);
+  const cue = state.prefs.cues[t.id] || '';
+  const logged = Object.entries(reasons).sort().reverse().slice(0, 5);
   return `<a class="back" href="#/">‹ Streaks</a>
     <div class="detail-head"><h1>${esc(t.text)}</h1></div>
     ${notes(state)}
@@ -184,12 +203,23 @@ export function detailView(state, id) {
       <div class="side">${statusPill(t, v.ctx)}<div class="muted" style="margin-top:6px;font-size:14px">${esc(describeSchedule(t))}</div></div>
     </div>
     ${checkButton(t, state.pending.has(t.id), true)}
+    ${misses.length ? `<div class="card why"><h2>Why did you miss?</h2><p>Naming the obstacle makes it easier to plan around next time.</p>
+      ${misses.map((d) => `<div class="why-day"><div class="small muted">${esc(fmtDay(d, { weekday: 'short', month: 'short', day: 'numeric' }))}</div>
+        <div class="chips">${MISS_REASONS.map((r) => `<button class="chip" data-action="reason" data-id="${esc(t.id)}" data-day="${d}" data-reason="${esc(r)}">${esc(r)}</button>`).join('')}</div></div>`).join('')}
+    </div>` : ''}
+    <form class="card" id="cue-form" data-id="${esc(t.id)}">
+      <h2>Plan</h2>
+      <p>When and where will you do it? A specific cue ("After morning coffee, at my desk") makes it far more likely to happen.</p>
+      <div class="field"><input type="text" name="cue" maxlength="80" value="${esc(cue)}" placeholder="After … , at …" aria-label="When and where"><button class="btn small-btn" type="submit">Save</button></div>
+      ${t.usual != null ? `<p class="small" style="margin:10px 0 0">You usually tick this around <b>${esc(fmtClock(t.usual, v.ctx.ds))}</b>.</p>` : ''}
+    </form>
     ${t.checklist?.length ? `<div class="card"><h2>Checklist</h2><ul class="checklist">${t.checklist.map((c) => `<li>
         <button class="check sm${c.completed ? ' on' : ''}" data-action="checklist" data-id="${esc(t.id)}" data-item="${esc(c.id)}" aria-pressed="${c.completed}" aria-label="${esc(c.text)}">${CHECK_ICON}</button>
         <span>${esc(c.text)}</span></li>`).join('')}</ul></div>` : ''}
     <div class="card">
       ${next ? `<div class="spread"><span class="muted">Next milestone</span><span><b class="num">${next - t.streak}</b> <span class="muted">to go → ${next} days</span></span></div>
-        <div class="progress"><i style="width:${progress}%"></i></div>` : `<div style="font-size:14px">Past every milestone. Legendary.</div>`}
+        <div class="progress"><i style="width:${progress}%"></i></div>
+        ${forecast ? `<p class="small muted" style="margin:8px 0 0">Keep going and you'll reach ${next} days on <b>${esc(fmtDay(forecast, { weekday: 'short', month: 'short', day: 'numeric' }))}</b>.</p>` : ''}` : `<div style="font-size:14px">Past every milestone. Legendary.</div>`}
       ${reached.length ? `<div class="row-meta" style="margin-top:12px"><span>Milestones reached:</span>${reached.map((m) => `<span class="pill ms">${m}-day</span>`).join('')}</div>` : ''}
     </div>
     <div class="stats">
@@ -200,11 +230,61 @@ export function detailView(state, id) {
     </div>
     ${weak ? `<p class="note">You miss this most on <b>${weekdayLong(weak.i)}s</b> (${weak.done}/${weak.due} done). Plan ahead for ${weekdayLong(weak.i)}s.</p>` : ''}
     <div class="card"><h2>History</h2>${heatmap(t, v.ctx)}</div>
+    ${logged.length ? `<div class="card"><h2>Miss reasons logged</h2><ul class="breaks">${logged.map(([d, r]) => `<li><span>${esc(fmtDay(d, { month: 'short', day: 'numeric' }))}</span><span class="muted">${esc(r)}</span></li>`).join('')}</ul></div>` : ''}
     <div class="card"><h2>Streak breaks</h2>
       ${t.breaks.length ? `<ul class="breaks">${t.breaks.map((b) => `<li><span>${fmtDay(b.day, { month: 'short', day: 'numeric', year: 'numeric' })}</span><span class="muted">lost a <b class="num">${b.lost}</b>-day streak</span></li>`).join('')}</ul>`
         : '<p>No breaks on record.</p>'}
     </div>
     ${t.notes ? `<div class="card"><h2>Notes</h2><p style="white-space:pre-wrap">${esc(t.notes)}</p></div>` : ''}`;
+}
+
+function overallCalendar(v) {
+  const today = v.ctx.cronDay;
+  const roll = dayRollup(v.tasks, today);
+  const dow = (k) => (new Date(k + 'T00:00:00Z').getUTCDay() + 6) % 7;
+  let start = addDays(today, -7 * 17);
+  start = addDays(start, -dow(start));
+  const end = addDays(today, 6 - dow(today));
+  let html = '', lastMonth = '';
+  for (let wk = start; wk <= end; wk = addDays(wk, 7)) {
+    const month = wk.slice(0, 7);
+    html += `<span class="m">${month !== lastMonth ? fmtDay(wk, { month: 'short' }) : ''}</span>`;
+    lastMonth = month;
+    for (let d = 0; d < 7; d++) {
+      const k = addDays(wk, d);
+      const r = roll[k];
+      let cls = k > today ? 'future' : '';
+      if (r && k <= today) cls = r.perfect ? 'done' : r.done === 0 ? (k < today ? 'missed' : '') : 'part';
+      const title = r ? `${fmtDay(k)}: ${r.done}/${r.due} done` : `${fmtDay(k)}: no data`;
+      html += `<i class="${cls}${k === today ? ' today' : ''}" title="${esc(title)}"></i>`;
+    }
+  }
+  return `<div class="heat-wrap"><div class="heat" role="img" aria-label="Daily completion calendar">${html}</div></div>
+    <div class="legend">
+      <span><i style="background:var(--cell-done)"></i>All done</span>
+      <span><i style="background:var(--cell-part)"></i>Some</span>
+      <span><i style="background:var(--cell-missed)"></i>None</span>
+      <span><i style="background:var(--cell-empty)"></i>No data</span>
+    </div>`;
+}
+
+function reasonsCard(state, from, n) {
+  const stats = reasonStats(state.prefs.reasons, from);
+  if (!stats.length) return '';
+  const total = stats.reduce((s, x) => s + x.n, 0);
+  const tips = {
+    Forgot: 'Add a plan (when + where) to the dailies you forget, or tie them to something you already do.',
+    'No time': 'Try a 2-minute version on busy days: showing up keeps the streak alive.',
+    Tired: 'Move tiring dailies earlier in the day, before your energy runs out.',
+    Travel: 'Decide in advance what the travel version of each daily looks like.',
+  };
+  const top = stats[0].reason;
+  return `<div class="card"><h2>Why you miss · last ${n} days</h2>
+    <ul class="rates">${stats.map((x) => `<li><div style="padding:10px 0">
+      <div class="spread"><span>${esc(x.reason)}</span><b class="num">${x.n}</b></div>
+      <div class="progress"><i style="width:${Math.round((x.n / total) * 100)}%"></i></div></div></li>`).join('')}</ul>
+    ${tips[top] ? `<p style="margin:10px 0 0">${esc(tips[top])}</p>` : ''}
+  </div>`;
 }
 
 export function insightsView(state) {
@@ -232,6 +312,8 @@ export function insightsView(state) {
         <div><b class="num">${perfect.current}<small> / ${perfect.best}</small></b><span>perfect-day streak / best</span></div>
       </div>
     </section>
+    <div class="card"><h2>Consistency calendar</h2>${overallCalendar(v)}</div>
+    ${reasonsCard(state, p.from, n)}
     <div class="card"><h2>By weekday</h2>
       <div class="bars">${wd.map((w) => `<div class="bar${weak && weak.i === w.i ? ' weak' : ''}" title="${w.done}/${w.due}">
         <i style="height:${w.rate == null ? 0 : Math.max(4, Math.round(w.rate * 100))}%"></i><span>${weekdayName(w.i).slice(0, 2)}</span></div>`).join('')}</div>
@@ -251,19 +333,22 @@ export function habitsView(state) {
   if (!v) return `${topbar(state, 'Habits')}<ul class="list">${'<li class="skel"></li>'.repeat(3)}</ul>`;
   const habits = v.habits;
   if (!habits.length) return `${topbar(state, 'Habits')}<div class="empty"><h2>No positive habits</h2><p>Habits with a + button in Habitica show up here.</p></div>`;
-  const rows = habits.map((h) => ({ h, s: habitStats(h, v.ctx.tz, v.ctx.ds, v.ctx.cronDay) }))
+  const rows = habits.map((h) => ({ h, s: habitStats(h, v.ctx.tz, v.ctx.ds, v.ctx.cronDay, state.prefs.targets[h.id] || 1) }))
     .sort((a, b) => b.s.streak - a.s.streak || a.h.text.localeCompare(b.h.text));
   const periodWord = { day: 'today', week: 'this week', month: 'this month' };
   return `${topbar(state, 'Habits')}
-    <p class="muted small">A habit's streak counts the days, weeks or months in a row (its Habitica reset period) with at least one +.</p>
+    <p class="muted small">A habit's streak counts the days, weeks or months in a row (its Habitica reset period) where you hit its goal. Tap a goal to change it.</p>
     <ul class="list">${rows.map(({ h, s }) => `<li class="row${s.streak ? '' : ' zero'}${s.thisPeriod ? ' done' : ''}">
       <button class="check plus${state.pending.has(h.id) ? ' pending' : ''}" data-action="habit" data-id="${esc(h.id)}" aria-label="Plus one: ${esc(h.text)}">${PLUS_ICON}</button>
       <div class="row-link">
         <div class="row-body">
           <div class="row-title">${esc(h.text)}</div>
           <div class="row-meta">
-            ${s.thisPeriod ? `<span class="pill done">✓ ${s.thisPeriod}× ${periodWord[s.unit]}</span>` : `<span class="pill due">Not yet ${periodWord[s.unit]}</span>`}
-            <span>best <span class="num">${s.best}</span> ${s.unit}s</span>
+            ${s.target > 1
+              ? `<span class="pill ${s.thisPeriod >= s.target ? 'done' : 'due'}">${s.thisPeriod >= s.target ? '✓ ' : ''}${s.thisPeriod}/${s.target} ${periodWord[s.unit]}</span>`
+              : s.thisPeriod ? `<span class="pill done">✓ ${s.thisPeriod}× ${periodWord[s.unit]}</span>` : `<span class="pill due">Not yet ${periodWord[s.unit]}</span>`}
+            <button class="pill pill-btn" data-action="target" data-id="${esc(h.id)}">Goal: ${s.target}/${s.unit}</button>
+            <span>best <span class="num">${s.best}</span></span>
           </div>
         </div>
         <div class="row-streak num" aria-label="${s.streak} ${s.unit} streak">${FLAME}${s.streak}<small>${s.unit[0]}</small></div>

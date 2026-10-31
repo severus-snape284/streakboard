@@ -1,5 +1,5 @@
 // Pure data model: turns API responses + local records into what the UI renders.
-import { crossedMilestones } from './insights.js';
+import { crossedMilestones, usualTime } from './insights.js';
 import {
   dayKey, isCronStale, analyzeHistory, historyToDays, mergeDays,
   reconstructStreaks, daysBetween,
@@ -109,6 +109,8 @@ export function buildView(data, snapshots, observedList, now = Date.now()) {
     if (!snapsBy.has(s.taskId)) snapsBy.set(s.taskId, []);
     snapsBy.get(s.taskId).push(s);
   }
+  const analysis = analyzeHistory(data.dailies, { lastCron: data.user?.lastCron, tzOffsetMin: ctx.tz, dayStart: ctx.ds });
+  const timing = { tz: ctx.tz, dayStart: ctx.ds, cronStart: analysis.cronStart };
   const tasks = data.dailies.map((t) => {
     const o = obs.get(t.id);
     const days = mergeDays(o?.days || {}, snapsBy.get(t.id) || [], ctx.cronDay);
@@ -122,6 +124,7 @@ export function buildView(data, snapshots, observedList, now = Date.now()) {
       completions: recon.completions,
       dueDays: recon.dueDays,
       rate: recon.dueDays ? recon.completions / recon.dueDays : null,
+      usual: usualTime(t, timing),
     };
   });
   return { ctx, user: data.user, fetchedAt: data.fetchedAt, tasks, habits: data.habits || [] };
@@ -143,4 +146,15 @@ export function describeSchedule(t) {
   }
   if (t.frequency === 'yearly') return n === 1 ? 'Yearly' : `Every ${n} years`;
   return '';
+}
+
+/** User-entered data: { cues: {taskId: text}, reasons: {taskId: {day: reason}}, targets: {habitId: n} }. */
+export function mergePrefs(a = {}, b = {}) {
+  const reasons = { ...(a.reasons || {}) };
+  for (const [id, byDay] of Object.entries(b.reasons || {})) reasons[id] = { ...(reasons[id] || {}), ...byDay };
+  return {
+    cues: { ...(b.cues || {}), ...(a.cues || {}) },
+    targets: { ...(b.targets || {}), ...(a.targets || {}) },
+    reasons,
+  };
 }
