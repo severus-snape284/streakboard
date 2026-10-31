@@ -34,6 +34,9 @@ Keep using the official Habitica app to check things off. Streakboard is the sco
 - **Stays in sync with Habitica**: refreshes every time you switch back to the app and every 2 minutes while open
   (3 requests each, well under the rate limit), plus pull-to-refresh. Inn status, completions, habit counters, new or
   renamed tasks all come from Habitica
+- **Trends**: streak length over the last 90 days and weekly completion for each daily, an overall weekly trend,
+  a month-by-month table, and 12-week sparklines per daily. Tap a chart for exact values, or "Show data" for a table
+- Home grouped into **To do / Done / Not today**, with the last 7 days as dots on every row
 - Opens offline, last-updated timestamp
 - Export / Import a JSON backup
 
@@ -62,7 +65,9 @@ iOS doesn't allow widgets for web apps, so `widgets/streakboard-widget.js` is a 
 2. Run it once in Scriptable and enter your User ID and API token.
 3. Add a Scriptable widget (small, medium or large, or a Lock Screen size). Then **long-press it → Edit Widget →
    Script → Streakboard**. If it says "Configure widget to select the script to run", this step hasn't been done yet.
-   Set the widget parameter to `risk` to list at-risk and due dailies first instead of top streaks.
+   Widget parameter (same panel): empty = top streaks, `risk` = at-risk and due dailies first, or **a daily's name**
+   (e.g. `Google`, part of the name is enough) for a **single-daily widget**: big streak, best ever, last 7 days,
+   today's status, next milestone. Works in every size, including the Lock Screen.
 
 **Smart reminders:** every time the widget refreshes, it reschedules two local notifications, but only if dailies are
 still due: an evening reminder (21:00) and a "last call" 90 minutes before your Habitica day resets. Both name the daily

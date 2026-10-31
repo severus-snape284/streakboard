@@ -6,7 +6,7 @@ built yet. Read all of it before starting.
 
 ## Status
 
-- **Phase 0 done, v1 through v2.4 built and live (2026-10-31):** https://severus-snape284.github.io/streakboard/
+- **Phase 0 done, v1 through v3.0 built and live (2026-10-31):** https://severus-snape284.github.io/streakboard/
 - v2 + consistency extras shipped (owner asked for "all additions that help me be consistent"): tick
   dailies/checklists with optimistic UI, streak rescue + `POST /cron`, countdown/progress ring,
   don't-miss-twice, perfect days, Insights tab, Habits tab, milestone celebrations, app badge.
@@ -29,6 +29,12 @@ built yet. Read all of it before starting.
   if data > 20s old, and every 2 min while visible. Habit "this period" uses Habitica's `counterUp`.
   Habit + button turns green ✓ with count once the goal is met (still tappable). New logo: `tools/icon.svg`
   rendered by `tools/render_icons.mjs` (flame inside a progress ring); `tools/make_icons.py` removed.
+- v3.0 (owner: single-daily widget, trends, "best possible UI"): full CSS rewrite (tokens, large titles,
+  grouped To do/Done/Not today lists, 7-day dots per row, merged "Needs attention" card, check pop animation);
+  `js/charts.js` = dependency-free SVG charts following the dataviz skill specs (single series, ≤24px columns,
+  2px line + 10% area, hairline grid, tap tooltips, "Show data" tables); trends in detail + Insights.
+  Widget parameter = a daily's name → single-daily widget; widget embeds a copy of the history logic,
+  kept equal to the app's by `tests/widget.test.mjs`.
 - Verified in Habitica source (`website/server/libs/cron.js`, `common/script/ops/scoreTask.js`):
   GET requests do NOT run cron (only `POST /cron`); score up = streak+1 + history push;
   score down = streak−1 + removes last history entry.

@@ -3,6 +3,7 @@ import * as store from './store.js';
 import { crossedMilestones, fmtDuration, nextRollover } from './insights.js';
 import { homeView, detailView, insightsView, habitsView, settingsView } from './views.js';
 import { esc, relTime, toast, FLAME } from './ui.js';
+import { initChartTooltips } from './charts.js';
 
 const app = document.getElementById('app');
 
@@ -15,6 +16,7 @@ const state = {
   badge: localStorage.getItem('sb.badge') === '1',
   persisted: null,
   pending: new Set(), // task ids with a write in flight
+  justDone: new Set(), // ids ticked moments ago (plays the check animation once)
   prefs: { cues: {}, reasons: {}, targets: {}, minis: {} }, // user-entered, device-local
 };
 
@@ -168,6 +170,10 @@ async function toggleDaily(id, { skipConfirm = false } = {}) {
   const up = !t.completed;
   if (!up && !skipConfirm && !confirm(`Mark "${t.text}" as not done? This lowers its streak by one.`)) return;
   const before = { completed: t.completed, streak: t.streak };
+  if (up) {
+    state.justDone.add(id); // the optimistic render plays the check animation once
+    setTimeout(() => state.justDone.delete(id), 900);
+  }
   const ok = await optimistic('daily', id,
     (it) => { it.completed = up; it.streak = Math.max(0, it.streak + (up ? 1 : -1)); },
     (it) => { it.completed = before.completed; it.streak = before.streak; },
@@ -433,6 +439,7 @@ async function exportBackup() {
 // ---------- boot ----------
 
 async function boot() {
+  initChartTooltips(app);
   window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
   render();
   try {

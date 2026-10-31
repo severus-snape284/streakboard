@@ -342,3 +342,81 @@ export function adjustmentTips(tasks, today, { minis = {}, dayStart = 0 } = {}) 
   }
   return out.sort((a, b) => a.rate - b.rate);
 }
+
+// ---------- trends ----------
+
+const MONDAY = (k) => addDays(k, -weekdayIndex(k));
+
+/**
+ * Weekly completion over the last `weeks` weeks (Monday-based, current week last).
+ * daysList: array of per-day status maps (one per daily). rate is null for weeks with no due days.
+ */
+export function weeklyRates(daysList, today, weeks = 12) {
+  const start = addDays(MONDAY(today), -7 * (weeks - 1));
+  const out = [];
+  for (let w = 0; w < weeks; w++) {
+    const from = addDays(start, 7 * w), to = addDays(from, 6);
+    let done = 0, due = 0;
+    for (const days of daysList) {
+      for (const [k, v] of Object.entries(days || {})) {
+        if (k < from || k > to || k > today) continue;
+        if (v === 'done') { done++; due++; } else if (v === 'missed') due++;
+      }
+    }
+    out.push({ from, to, done, due, rate: due ? done / due : null, current: today >= from && today <= to });
+  }
+  return out;
+}
+
+/** Streak value at the end of each day from `from` to `today` (Habitica-style walk over all known days). */
+export function streakSeries(days, today, from) {
+  const keys = Object.keys(days || {}).sort();
+  let cur = 0, i = 0;
+  const out = [];
+  const first = keys[0] && keys[0] < from ? keys[0] : from;
+  for (let k = first; k <= today; k = addDays(k, 1)) {
+    while (i < keys.length && keys[i] <= k) {
+      const s = days[keys[i]];
+      if (keys[i] === k) {
+        if (s === 'done') cur++;
+        else if (s === 'missed') cur = 0;
+      }
+      i++;
+    }
+    if (k >= from) out.push({ day: k, streak: cur });
+  }
+  return out;
+}
+
+/** Month-by-month summary across dailies, newest first. */
+export function monthlyStats(tasks, today, months = 6) {
+  const roll = dayRollup(tasks, today);
+  const out = [];
+  let [y, m] = today.slice(0, 7).split('-').map(Number);
+  for (let i = 0; i < months; i++) {
+    const key = `${y}-${String(m).padStart(2, '0')}`;
+    let done = 0, due = 0;
+    for (const t of tasks) {
+      for (const [k, v] of Object.entries(t.days || {})) {
+        if (!k.startsWith(key) || k > today) continue;
+        if (v === 'done') { done++; due++; } else if (v === 'missed') due++;
+      }
+    }
+    const perfect = Object.entries(roll).filter(([k, r]) => k.startsWith(key) && r.perfect).length;
+    if (due) out.push({ month: key, done, due, rate: done / due, perfect });
+    m--; if (m === 0) { m = 12; y--; }
+  }
+  return out;
+}
+
+/** Last n day statuses ending today (oldest first); today uses live task state. */
+export function recentDots(task, today, n = 7) {
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const k = addDays(today, -i);
+    let s = (task.days || {})[k] || '';
+    if (i === 0) s = task.completed ? 'done' : task.isDue ? 'due' : 'notdue';
+    out.push({ day: k, status: s });
+  }
+  return out;
+}

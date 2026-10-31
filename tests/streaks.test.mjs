@@ -262,3 +262,21 @@ test('tomorrow preview and adjustment tips', () => {
   assert.ok(I.adjustmentTips([struggling], today)[0].tip.includes('2-minute'), 'suggests a 2-minute version when none set');
   assert.ok(I.adjustmentTips([struggling], today, { minis: { s: 'one page' } })[0].tip.includes('few set days'));
 });
+
+test('trends: weekly rates, streak series, monthly stats, recent dots', () => {
+  const today = '2026-10-31'; // Saturday
+  const days = { '2026-10-19': 'done', '2026-10-20': 'missed', '2026-10-26': 'done', '2026-10-27': 'done', '2026-10-28': 'rest', '2026-10-29': 'done', '2026-10-31': 'due' };
+  const w = I.weeklyRates([days], today, 3);
+  assert.deepEqual(w.map((x) => x.from), ['2026-10-12', '2026-10-19', '2026-10-26']);
+  assert.deepEqual(w.map((x) => x.rate), [null, 0.5, 1]);
+  assert.equal(w[2].current, true);
+  const ss = I.streakSeries(days, today, '2026-10-25');
+  assert.deepEqual(ss.map((x) => x.streak), [0, 1, 2, 2, 3, 3, 3]);
+  const m = I.monthlyStats([{ days }], today, 3);
+  assert.equal(m.length, 1);
+  assert.equal(m[0].month, '2026-10');
+  assert.equal(m[0].done, 4);
+  assert.equal(m[0].due, 5);
+  const dots = I.recentDots({ days, completed: false, isDue: true }, today, 3);
+  assert.deepEqual(dots.map((d) => d.status), ['done', '', 'due']);
+});

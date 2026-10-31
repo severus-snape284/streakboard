@@ -148,3 +148,31 @@ test('widget schedules smart reminders only while dailies are due', async () => 
   await run(off);
   assert.equal(off.notif.removed.length, 0, 'offline cache never touches reminders');
 });
+
+test('single-daily widget: matches app logic for best streak and last 7 days', async () => {
+  const { ingest, buildView } = await import('../js/model.js');
+  const { recentDots } = await import('../js/insights.js');
+  for (const family of ['small', 'medium', 'accessoryRectangular', 'accessoryCircular', 'accessoryInline']) {
+    const e = makeEnv({ family, param: 'meditate', now: NOON });
+    await run(e);
+    const all = e.texts.join(' | ');
+    assert.ok(all.includes('1') && (family.startsWith('accessory') || all.includes('Meditate')), `${family}: ${all}`);
+    if (family === 'small' || family === 'medium') {
+      // Same numbers as the app: best 7 for Meditate, and the same 7-day pattern.
+      const { snapshots, observed } = ingest(e.user, e.dailies, [], NOON);
+      const v = buildView({ user: e.user, dailies: e.dailies, fetchedAt: NOON }, snapshots, observed, NOON);
+      const t = v.tasks.find((x) => x.text === 'Meditate');
+      assert.ok(all.includes(`best ${t.best}`), `best ${t.best} in: ${all}`);
+      const appDots = recentDots(t, v.ctx.cronDay, 7).map((x) => (x.status === 'due' ? '□' : '■')).join('');
+      const widgetDots = e.texts.filter((x) => x === '■' || x === '□').slice(0, 7).join('');
+      assert.equal(widgetDots, appDots);
+      assert.ok(all.includes('Due'), all);
+    }
+  }
+  const none = makeEnv({ family: 'small', param: 'nonexistent daily', now: NOON });
+  await run(none);
+  assert.ok(none.texts.join(' ').includes('No daily matches'));
+  const risk = makeEnv({ family: 'medium', param: 'RISK', now: NOON });
+  await run(risk);
+  assert.ok(!risk.texts.join(' ').includes('No daily matches'), 'risk keyword is case-insensitive');
+});

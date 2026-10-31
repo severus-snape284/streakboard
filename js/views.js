@@ -5,11 +5,13 @@ import {
   weekdayName, weekdayLong, habitStats, nextRollover, fmtDuration,
   fmtClock, pastUsualTime, minutesIntoDay, milestoneForecast, unexplainedMisses, reasonStats, MISS_REASONS,
   weeklyReview, focusProgress, focusExpired, dueTomorrow, adjustmentTips,
+  weeklyRates, streakSeries, monthlyStats, recentDots,
 } from './insights.js';
+import { weeklyColumns, streakLine, sparkColumns } from './charts.js';
 import { describeSchedule } from './model.js';
 import { esc, relTime, fmtDay, pct, FLAME, REFRESH_ICON, CHECK_ICON, PLUS_ICON, ring } from './ui.js';
 
-export const APP_VERSION = '2.4.0';
+export const APP_VERSION = '3.0.0';
 
 const nowMin = (ctx) => minutesIntoDay(Date.now(), ctx.tz, ctx.ds);
 
@@ -20,18 +22,22 @@ function dayLabel(ctx) {
   return ctx?.stale ? fmtDay(ctx.cronDay, { weekday: 'short' }) : 'today';
 }
 
-function topbar(state, title) {
+function topbar(state, title, eyebrow = '') {
   const v = state.view;
-  return `<header class="topbar">
-    <h1>${esc(title)}</h1>
-    <div class="updated">
-      ${v ? `<span>Updated <span data-rel="${v.fetchedAt}">${relTime(v.fetchedAt)}</span></span>` : ''}
-      <button class="icon-btn" data-action="refresh" aria-label="Refresh">
+  const status = state.error ? 'err' : state.loading ? 'busy' : 'ok';
+  return `<header class="page-head">
+    ${eyebrow ? `<div class="eyebrow">${esc(eyebrow)}</div>` : ''}
+    <div class="title-row">
+      <h1>${esc(title)}</h1>
+      <button class="icon-btn" data-action="refresh" aria-label="Refresh from Habitica">
         <span class="${state.loading ? 'spin' : ''}" style="display:inline-flex">${REFRESH_ICON}</span>
       </button>
     </div>
+    ${v ? `<div class="sync"><i class="sync-dot ${status}"></i>${state.loading ? 'Syncing with Habitica…' : `Synced <span data-rel="${v.fetchedAt}">${relTime(v.fetchedAt)}</span>`}</div>` : ''}
   </header>`;
 }
+
+const todayEyebrow = (ctx) => fmtDay(ctx.cronDay, { weekday: 'long', month: 'long', day: 'numeric' });
 
 function notes(state, { rescue = false } = {}) {
   const v = state.view;
@@ -57,8 +63,15 @@ function notes(state, { rescue = false } = {}) {
   return out;
 }
 
-function statusPill(t, ctx) {
+function statusPill(t, ctx, { quiet = false } = {}) {
   const s = statusOf(t);
+  if (quiet) {
+    if (s !== 'due' || ctx.resting) return '';
+    if (missedLastTime(t, ctx.cronDay)) return '<span class="pill risk">Don\'t miss twice</span>';
+    if (atRisk(t)) return '<span class="pill risk">At risk</span>';
+    if (!ctx.stale && pastUsualTime(t, nowMin(ctx))) return `<span class="pill late">Usually by ${esc(fmtClock(t.usual, ctx.ds))}</span>`;
+    return '';
+  }
   const d = dayLabel(ctx);
   if (s === 'done') return `<span class="pill done">✓ Done ${esc(d)}</span>`;
   if (s === 'due') {
@@ -71,9 +84,9 @@ function statusPill(t, ctx) {
   return `<span class="pill">Not due ${esc(d)}</span>`;
 }
 
-function checkButton(t, pending, big = false) {
+function checkButton(t, pending, big = false, pop = false) {
   const done = !!t.completed;
-  return `<button class="check${done ? ' on' : ''}${big ? ' big' : ''}${pending ? ' pending' : ''}" data-action="toggle" data-id="${esc(t.id)}"
+  return `<button class="check${done ? ' on' : ''}${big ? ' big' : ''}${pending ? ' pending' : ''}${pop && done ? ' pop' : ''}" data-action="toggle" data-id="${esc(t.id)}"
     aria-pressed="${done}" aria-label="${done ? 'Mark not done' : 'Mark done'}: ${esc(t.text)}">${CHECK_ICON}${big ? `<span>${done ? 'Done' : 'Mark done'}</span>` : ''}</button>`;
 }
 
@@ -86,17 +99,29 @@ function rowView(t, state) {
   if (ms) cls.push('milestone');
   if (ms && ms === t.streak) cls.push('milestone-hit');
   const cl = t.checklist?.length ? `<span>☑ ${t.checklist.filter((c) => c.completed).length}/${t.checklist.length}</span>` : '';
+  const isFocus = state.prefs.focus?.taskId === t.id && !focusExpired(state.prefs.focus, ctx.cronDay);
   return `<li class="${cls.join(' ')}">
-    ${checkButton(t, state.pending.has(t.id))}
+    ${checkButton(t, state.pending.has(t.id), false, state.justDone?.has(t.id))}
     <a class="row-link" href="${link(t.id)}">
       <div class="row-body">
         <div class="row-title">${esc(t.text)}</div>
         ${cue ? `<div class="row-cue">→ ${esc(cue)}</div>` : ''}
-        <div class="row-meta">${state.prefs.focus?.taskId === t.id && !focusExpired(state.prefs.focus, ctx.cronDay) ? '<span class="pill ms">Focus</span>' : ''}${statusPill(t, ctx)}${state.sort === 'time' && t.usual != null ? `<span>~${esc(fmtClock(t.usual, ctx.ds))}</span>` : ''}${ms ? `<span class="pill ms">${ms}-day</span>` : ''}${cl}<span>best <span class="num">${t.best}</span></span></div>
+        <div class="row-meta">${isFocus ? '<span class="pill ms">Focus</span>' : ''}${statusPill(t, ctx, { quiet: true })}${ms ? `<span class="pill ms">${ms}-day</span>` : ''}${t.usual != null && state.sort === 'time' ? `<span>~${esc(fmtClock(t.usual, ctx.ds))}</span>` : ''}${cl}</div>
+        ${dots(t, ctx)}
       </div>
-      <div class="row-streak num" aria-label="${t.streak} day streak">${FLAME}${t.streak}</div>
+      <div class="row-right">
+        <div class="row-streak num" aria-label="${t.streak} day streak">${FLAME}${t.streak}</div>
+        <div class="row-best">best ${t.best}</div>
+      </div>
     </a>
   </li>`;
+}
+
+const DOT_LABEL = { done: 'done', missed: 'missed', notdue: 'not due', due: 'due', rest: 'rest', '': 'no data' };
+function dots(t, ctx) {
+  const d = recentDots(t, ctx.cronDay, 7);
+  return `<div class="dots" role="img" aria-label="Last 7 days: ${d.map((x) => DOT_LABEL[x.status] || 'no data').join(', ')}">${d
+    .map((x, i) => `<i class="${x.status || 'none'}${i === d.length - 1 ? ' today' : ''}"></i>`).join('')}</div>`;
 }
 
 /** Day plan order: open dailies by usual time (unknown last), then done, then not due. */
@@ -124,17 +149,17 @@ export function homeView(state) {
   const perfect = perfectStreak(dayRollup(tasks, ctx.cronDay), ctx.cronDay);
   // Streaks can't break while resting in the Inn, so skip the warnings then.
   const resting = ctx.resting;
-  const twice = resting ? [] : sortTasks(tasks.filter((t) => missedLastTime(t, ctx.cronDay)), 'streak');
-  const risky = resting ? [] : sortTasks(tasks.filter((t) => atRisk(t) && !missedLastTime(t, ctx.cronDay)), 'streak');
+  const attention = resting ? [] : sortTasks(tasks.filter((t) => missedLastTime(t, ctx.cronDay) || atRisk(t)), 'streak');
   const left = ctx.stale ? null : nextRollover(ctx.today, ctx.tz, ctx.ds) - Date.now();
-  const sorted = state.sort === 'time' ? sortByTime(tasks) : sortTasks(tasks, state.sort);
+  const sorter = (list) => (state.sort === 'time' ? sortByTime(list) : sortTasks(list, state.sort === 'name' ? 'name' : 'streak'));
+  const groups = [
+    ['todo', 'To do', sorter(tasks.filter((t) => t.isDue && !t.completed))],
+    ['done', 'Done', sorter(tasks.filter((t) => t.completed))],
+    ['later', ctx.stale ? 'Not due' : 'Not today', sorter(tasks.filter((t) => !t.isDue && !t.completed))],
+  ];
   const tomorrow = ctx.stale ? [] : dueTomorrow(tasks, ctx.cronDay, ctx.tz);
-  const seg = [['streak', 'Streak'], ['due', 'Due'], ['time', 'Time'], ['name', 'Name']]
-    .map(([k, l]) => `<button data-sort="${k}" aria-pressed="${state.sort === k}">${l}</button>`).join('');
-  const bannerItem = (t) => {
-    const mini = state.prefs.minis?.[t.id];
-    return `<li>${checkButton(t, state.pending.has(t.id))}<a href="${link(t.id)}"><span>${esc(t.text)}${mini ? `<small class="mini">Short on time? ${esc(mini)}</small>` : ''}</span><span class="num">${FLAME}${t.streak}</span></a></li>`;
-  };
+  const seg = [['streak', 'Streak'], ['time', 'Time'], ['name', 'Name']]
+    .map(([k, l]) => `<button data-sort="${k}" aria-pressed="${(state.sort === 'due' ? 'streak' : state.sort) === k}">${l}</button>`).join('');
   const focus = state.prefs.focus;
   const focusTask = !focusExpired(focus, ctx.cronDay) && tasks.find((t) => t.id === focus.taskId);
   let focusCard = '';
@@ -151,32 +176,47 @@ export function homeView(state) {
       <div>Review last week and pick one daily to focus on →</div>
     </a>`;
   }
+  const allDone = dueTotal && doneDue === dueTotal;
+  const attentionItem = (t) => {
+    const twice = missedLastTime(t, ctx.cronDay);
+    const mini = state.prefs.minis?.[t.id];
+    return `<li data-kind="${twice ? 'twice' : 'risk'}">${checkButton(t, state.pending.has(t.id))}<a href="${link(t.id)}">
+      <span class="att-body"><span class="att-title">${esc(t.text)}</span>
+        <small class="att-why">${twice ? 'Missed last time. Don\'t miss twice' : `${t.streak}-day streak at risk`}</small>
+        ${mini ? `<small class="mini">Short on time? ${esc(mini)}</small>` : ''}</span>
+      <span class="num att-streak">${FLAME}${t.streak}</span></a></li>`;
+  };
 
-  return `${topbar(state, 'Streakboard')}${notes(state, { rescue: true })}
-    ${risky.length ? `<section class="risk" aria-label="Streaks at risk"><h2>Streak at risk${left != null ? ` · <span data-countdown>${fmtDuration(left)}</span> left` : ''}</h2><ul>${risky.map(bannerItem).join('')}</ul></section>` : ''}
-    ${twice.length ? `<section class="risk twice" aria-label="Don't miss twice"><h2>Don't miss twice</h2>
-      <p>Missed last time. Doing it today keeps one slip from becoming a pattern.</p><ul>${twice.map(bannerItem).join('')}</ul></section>` : ''}
-    ${focusCard}
-    <section class="hero">
-      <div class="hero-main">
-        <div class="hero-num num">${FLAME}${hero.top ? hero.top.streak : 0}</div>
-        <div class="hero-label">Best current streak<b>${hero.top ? esc(hero.top.text) : 'Start one today'}</b></div>
-      </div>
-      <div class="hero-today">
-        <div class="ring-wrap">${ring(doneDue, dueTotal)}<span class="num">${doneDue}/${dueTotal}</span></div>
-        <div>
-          <b>${dueTotal && doneDue === dueTotal ? 'Perfect day!' : `${dueTotal - doneDue} still due ${esc(dayLabel(ctx))}`}</b>
-          ${dueTotal && doneDue === dueTotal && tomorrow.length ? `<span class="muted">Tomorrow: ${tomorrow.length} due (${esc(tomorrow.slice(0, 3).map((t) => t.text).join(', '))}${tomorrow.length > 3 ? '…' : ''})</span><br>` : ''}
-          <span class="muted">${left != null ? `<span data-countdown>${fmtDuration(left)}</span> until your day resets` : 'New Habitica day is waiting'}</span>
+  return `${topbar(state, 'Today', todayEyebrow(ctx))}${notes(state, { rescue: true })}
+    <section class="hero today">
+      <div class="today-top">
+        <div class="ring-wrap">${ring(doneDue, dueTotal, 104)}<div class="ring-center"><span class="num">${doneDue}/${dueTotal}</span><small>done</small></div></div>
+        <div class="today-copy">
+          <div class="today-head">${allDone ? 'Perfect day' : `${dueTotal - doneDue} to go`}</div>
+          <div class="muted">${left != null ? `<span data-countdown>${fmtDuration(left)}</span> until your day resets` : 'New Habitica day is waiting'}</div>
+          ${allDone && tomorrow.length ? `<div class="muted small">Tomorrow: ${tomorrow.length} due</div>` : ''}
         </div>
       </div>
+      ${hero.top ? `<a class="hero-best" href="${link(hero.top.id)}">
+        <span class="hero-num num">${FLAME}${hero.top.streak}</span>
+        <span class="hero-label">Best current streak<b>${esc(hero.top.text)}</b></span>
+        <span class="chev" aria-hidden="true">›</span></a>` : `<div class="hero-best"><span class="hero-num num">${FLAME}0</span><span class="hero-label">Best current streak<b>Start one today</b></span></div>`}
       <div class="hero-stats">
         <div><b class="num">${hero.active}</b><span>active streak${hero.active === 1 ? '' : 's'}</span></div>
         <div><b class="num">${perfect.current}</b><span>perfect day${perfect.current === 1 ? '' : 's'} in a row</span></div>
       </div>
     </section>
-    <div class="seg" role="group" aria-label="Sort by">${seg}</div>
-    <ul class="list">${sorted.map((t) => rowView(t, state)).join('')}</ul>`;
+    ${attention.length ? `<section class="attention" aria-label="Needs attention">
+      <h2>Needs attention${left != null ? `<span class="att-left"><span data-countdown>${fmtDuration(left)}</span> left</span>` : ''}</h2>
+      <ul>${attention.map(attentionItem).join('')}</ul></section>` : ''}
+    ${focusCard}
+    <div class="list-head"><div class="seg" role="group" aria-label="Sort by">${seg}</div></div>
+    ${groups.map(([key, label, list]) => {
+      if (!list.length && key !== 'todo') return '';
+      return `<h2 class="section-title">${label}<span>${list.length}</span></h2>
+        ${list.length ? `<ul class="list" data-group="${key}">${list.map((t) => rowView(t, state)).join('')}</ul>`
+          : `<div class="all-done">${FLAME}<div><b>${allDone ? 'All done for today' : 'Nothing due right now'}</b><span class="muted small">${allDone && tomorrow.length ? `Tomorrow: ${esc(tomorrow.slice(0, 3).map((t) => t.text).join(', '))}${tomorrow.length > 3 ? '…' : ''}` : 'Enjoy it.'}</span></div></div>`}`;
+    }).join('')}`;
 }
 
 function heatmap(t, ctx) {
@@ -226,14 +266,24 @@ export function detailView(state, id) {
   const misses = unexplainedMisses(t, reasons, v.ctx.cronDay).slice(0, 3);
   const cue = state.prefs.cues[t.id] || '';
   const logged = Object.entries(reasons).sort().reverse().slice(0, 5);
-  return `<a class="back" href="#/">‹ Streaks</a>
-    <div class="detail-head"><h1>${esc(t.text)}</h1></div>
+  const firstDay = Object.keys(t.days).sort()[0] || v.ctx.cronDay;
+  const from = [addDays(v.ctx.cronDay, -89), firstDay].sort()[1];
+  const series = streakSeries(t.days, v.ctx.cronDay, from);
+  const weeks = weeklyRates([t.days], v.ctx.cronDay, 12);
+  return `<a class="back" href="#/">‹ Today</a>
+    <header class="detail-head"><div class="eyebrow">${esc(describeSchedule(t))}</div><h1>${esc(t.text)}</h1></header>
     ${notes(state)}
-    <div class="detail-hero">
-      <div class="big num">${FLAME}${t.streak}</div>
-      <div class="side">${statusPill(t, v.ctx)}<div class="muted" style="margin-top:6px;font-size:14px">${esc(describeSchedule(t))}</div></div>
-    </div>
-    ${checkButton(t, state.pending.has(t.id), true)}
+    <section class="detail-hero">
+      <div class="dh-top">
+        <div class="big num">${FLAME}${t.streak}</div>
+        <div class="side"><div class="unit">day streak</div>${statusPill(t, v.ctx)}<div class="muted small" style="margin-top:6px">Best ${t.best}</div></div>
+      </div>
+      ${next ? `<div class="dh-ms"><div class="spread"><span class="muted">Next milestone</span><span><b class="num">${next - t.streak}</b> <span class="muted">to go → ${next}</span></span></div>
+        <div class="progress"><i style="width:${progress}%"></i></div>
+        ${forecast ? `<div class="small muted" style="margin-top:8px">On track for ${next} days on <b>${esc(fmtDay(forecast, { weekday: 'short', month: 'short', day: 'numeric' }))}</b></div>` : ''}</div>` : '<div class="dh-ms small">Past every milestone. Legendary.</div>'}
+      ${reached.length ? `<div class="row-meta" style="margin-top:12px">${reached.map((m) => `<span class="pill ms">${m}-day</span>`).join('')}</div>` : ''}
+    </section>
+    ${checkButton(t, state.pending.has(t.id), true, state.justDone?.has(t.id))}
     ${misses.length ? `<div class="card why"><h2>Why did you miss?</h2><p>Naming the obstacle makes it easier to plan around next time.</p>
       ${misses.map((d) => `<div class="why-day"><div class="small muted">${esc(fmtDay(d, { weekday: 'short', month: 'short', day: 'numeric' }))}</div>
         <div class="chips">${MISS_REASONS.map((r) => `<button class="chip" data-action="reason" data-id="${esc(t.id)}" data-day="${d}" data-reason="${esc(r)}">${esc(r)}</button>`).join('')}</div></div>`).join('')}
@@ -251,12 +301,10 @@ export function detailView(state, id) {
     ${t.checklist?.length ? `<div class="card"><h2>Checklist</h2><ul class="checklist">${t.checklist.map((c) => `<li>
         <button class="check sm${c.completed ? ' on' : ''}" data-action="checklist" data-id="${esc(t.id)}" data-item="${esc(c.id)}" aria-pressed="${c.completed}" aria-label="${esc(c.text)}">${CHECK_ICON}</button>
         <span>${esc(c.text)}</span></li>`).join('')}</ul></div>` : ''}
-    <div class="card">
-      ${next ? `<div class="spread"><span class="muted">Next milestone</span><span><b class="num">${next - t.streak}</b> <span class="muted">to go → ${next} days</span></span></div>
-        <div class="progress"><i style="width:${progress}%"></i></div>
-        ${forecast ? `<p class="small muted" style="margin:8px 0 0">Keep going and you'll reach ${next} days on <b>${esc(fmtDay(forecast, { weekday: 'short', month: 'short', day: 'numeric' }))}</b>.</p>` : ''}` : `<div style="font-size:14px">Past every milestone. Legendary.</div>`}
-      ${reached.length ? `<div class="row-meta" style="margin-top:12px"><span>Milestones reached:</span>${reached.map((m) => `<span class="pill ms">${m}-day</span>`).join('')}</div>` : ''}
-    </div>
+    <section class="card trends"><h2>Trends</h2>
+      <h3>Streak length · last ${series.length} days</h3>${streakLine(series, { title: `Streak length for ${t.text}` })}
+      <h3>Done when due · weekly</h3>${weeklyColumns(weeks, { title: `Weekly completion for ${t.text}` })}
+    </section>
     <div class="stats">
       <div><b class="num">${t.best}</b><span>Best streak</span></div>
       <div><b class="num">${pct(last30.rate)}</b><span>Done when due, 30 days</span></div>
@@ -368,9 +416,9 @@ export function insightsView(state) {
   const seg = [[7, '7 days'], [30, '30 days']]
     .map(([k, l]) => `<button data-period="${k}" aria-pressed="${n === k}">${l}</button>`).join('');
   const arrow = (d) => (d == null ? '' : d > 0 ? `<span class="up">▲ ${d}</span>` : d < 0 ? `<span class="down">▼ ${-d}</span>` : '<span class="muted">±0</span>');
-  return `${topbar(state, 'Insights')}
-    ${reviewCard(state)}
-    ${adjustCard(state)}
+  const overall = weeklyRates(v.tasks.map((t) => t.days), v.ctx.cronDay, 12);
+  const months = monthlyStats(v.tasks, v.ctx.cronDay, 6);
+  return `${topbar(state, 'Insights', 'Your consistency')}
     <div class="seg" role="group" aria-label="Period">${seg}</div>
     <section class="hero">
       <div class="hero-main">
@@ -382,6 +430,15 @@ export function insightsView(state) {
         <div><b class="num">${perfect.current}<small> / ${perfect.best}</small></b><span>perfect-day streak / best</span></div>
       </div>
     </section>
+    <section class="card trends"><h2>Trend · done when due, weekly</h2>${weeklyColumns(overall, { title: 'Weekly completion, all dailies' })}
+      ${months.length > 1 ? `<h3>By month</h3><table class="months"><thead><tr><th>Month</th><th>Done</th><th>Rate</th><th>Perfect days</th></tr></thead><tbody>${months.map((m, i) => {
+        const prev = months[i + 1];
+        const d = prev ? Math.round((m.rate - prev.rate) * 100) : null;
+        return `<tr><td>${esc(fmtDay(m.month + '-01', { month: 'short', year: 'numeric' }))}</td><td class="num">${m.done}/${m.due}</td><td><b class="num">${pct(m.rate)}</b> ${arrow(d)}</td><td class="num">${m.perfect}</td></tr>`;
+      }).join('')}</tbody></table>` : ''}
+    </section>
+    ${reviewCard(state)}
+    ${adjustCard(state)}
     <div class="card"><h2>Consistency calendar</h2>${overallCalendar(v)}</div>
     ${reasonsCard(state, p.from, n)}
     <div class="card"><h2>By weekday</h2>
@@ -392,8 +449,8 @@ export function insightsView(state) {
     <div class="card"><h2>Per daily · weakest first</h2>
       ${per.length ? `<ul class="rates">${per.map((x) => `<li><a href="${link(x.task.id)}">
         <div class="spread"><span class="rate-title">${esc(x.task.text)}</span><span><b class="num">${pct(x.rate)}</b> ${arrow(x.prev.rate != null ? Math.round((x.rate - x.prev.rate) * 100) : null)}</span></div>
-        <div class="progress"><i style="width:${Math.round(x.rate * 100)}%"></i></div>
-        <div class="muted small">${x.done}/${x.due} due days done</div></a></li>`).join('')}</ul>` : '<p>No due days recorded in this period yet.</p>'}
+        <div class="rate-row"><div class="progress"><i style="width:${Math.round(x.rate * 100)}%"></i></div>${sparkColumns(weeklyRates([x.task.days], v.ctx.cronDay, 12))}</div>
+        <div class="muted small">${x.done}/${x.due} due days done · 12-week trend</div></a></li>`).join('')}</ul>` : '<p>No due days recorded in this period yet.</p>'}
     </div>
     <p class="muted small" style="text-align:center">Days you didn't open Habitica have no data and aren't counted.</p>`;
 }
@@ -406,7 +463,7 @@ export function habitsView(state) {
   const rows = habits.map((h) => ({ h, s: habitStats(h, v.ctx.tz, v.ctx.ds, v.ctx.cronDay, state.prefs.targets[h.id] || 1) }))
     .sort((a, b) => b.s.streak - a.s.streak || a.h.text.localeCompare(b.h.text));
   const periodWord = { day: 'today', week: 'this week', month: 'this month' };
-  return `${topbar(state, 'Habits')}
+  return `${topbar(state, 'Habits', 'Positive habits')}
     <p class="muted small">Tap + each time you do a habit. It turns green ✓ once you've hit its goal for the day/week/month; you can keep tapping to add more. The streak counts periods in a row where you hit the goal. Tap "Goal" to change it.</p>
     <ul class="list">${rows.map(({ h, s }) => `<li class="row${s.streak ? '' : ' zero'}${s.thisPeriod ? ' done' : ''}">
       <button class="check plus${s.thisPeriod >= s.target ? ' met' : ''}${state.pending.has(h.id) ? ' pending' : ''}" data-action="habit" data-id="${esc(h.id)}"
@@ -429,9 +486,9 @@ export function habitsView(state) {
 
 export function settingsView(state, setup, creds) {
   const badgeSupported = 'setAppBadge' in navigator;
-  return `${setup ? `<div class="welcome-logo"><img src="icons/icon-192.png" alt="" width="96" height="96"></div><header class="topbar"><h1>Welcome to Streakboard</h1></header>
+  return `${setup ? `<div class="welcome-logo"><img src="icons/icon-192.png" alt="" width="96" height="96"></div><header class="page-head center"><h1>Welcome to Streakboard</h1></header>
       <p class="muted">Your Habitica streaks, streak-first. Enter your Habitica API credentials to start. They're stored only on this device and sent only to habitica.com.</p>`
-    : '<header class="topbar"><h1>Settings</h1></header>'}
+    : '<header class="page-head"><div class="title-row"><h1>Settings</h1></div></header>'}
     <form class="card" id="creds-form" autocomplete="off">
       <h2>Habitica account</h2>
       <p>Find these in Habitica → Settings → Site Data → API.</p>
@@ -453,7 +510,8 @@ export function settingsView(state, setup, creds) {
         <li>Tap <b>Copy widget script</b> below. In Scriptable, tap <b>+</b>, paste, and name it "Streakboard".</li>
         <li>Run it once (▶) and enter your User ID and API token. They're saved in the iOS Keychain.</li>
         <li>Long-press your Home Screen → <b>+</b> → Scriptable → pick a size → <b>Add Widget</b>.</li>
-        <li>Then <b>long-press the new widget → Edit Widget</b> → Script: <b>Streakboard</b>, and tap outside to close. (Just tapping the widget opens Scriptable instead.) Optional parameter: <code>risk</code> shows at-risk dailies first.</li>
+        <li>Then <b>long-press the new widget → Edit Widget</b> → Script: <b>Streakboard</b>, and tap outside to close. (Just tapping the widget opens Scriptable instead.)</li>
+        <li><b>Parameter</b> (same panel): leave empty for top streaks, <code>risk</code> for at-risk dailies first, or a daily's name (e.g. <code>Google</code>) for a <b>single-daily streak widget</b>. Add several widgets for several dailies.</li>
         <li>Lock Screen: customise it → add a Scriptable widget → choose Streakboard.</li>
       </ol>
       <button class="btn" data-action="copy-widget">Copy widget script</button>

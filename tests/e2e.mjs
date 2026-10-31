@@ -109,11 +109,15 @@ check((await page.textContent('.ring-wrap .num')).trim() === '1/5', 'today ring 
 check(/\d+h \d+m|\d+m/.test(await page.textContent('[data-countdown]')), 'countdown to day reset shown');
 const stats = await page.locator('.hero-stats b').allTextContents();
 check(stats[0] === '5' && stats[1] === '0', `hero stats: active=5, perfect streak=0 (got ${stats})`);
-const riskText = await page.textContent('.risk:not(.twice)');
-check(riskText.includes('Stretch') && riskText.includes('Floss') && !riskText.includes('Journal'), 'at-risk banner lists Stretch and Floss');
-check((await page.textContent('.risk.twice')).includes('Journal'), "don't-miss-twice banner lists Journal");
+const riskText = (await page.locator('.attention li[data-kind=risk]').allTextContents()).join(' ');
+check(riskText.includes('Stretch') && riskText.includes('Floss') && !riskText.includes('Journal'), 'needs-attention lists Stretch and Floss as at risk');
+check((await page.textContent('.attention li[data-kind=twice]')).includes('Journal'), "needs-attention lists Journal as don't-miss-twice");
 const titles = await page.locator('.row-title').allTextContents();
-check(titles[0] === 'Read 20 pages' && titles[1] === 'Floss', `sorted by streak desc (${titles.join(' | ')})`);
+const todo = await page.locator('.list[data-group=todo] .row-title').allTextContents();
+check(todo.join('|') === 'Floss|Stretch|Meditate|Journal <b>tag</b>', `To do group sorted by streak (${todo.join(' | ')})`);
+check((await page.textContent('.list[data-group=done]')).includes('Read 20 pages'), 'Done group holds completed dailies');
+check((await page.textContent('.list[data-group=later]')).includes('Bike clean'), 'Not today group holds not-due dailies');
+check(await page.locator('.row .dots').count() === 6 && await page.locator('.row .dots i').count() === 42, 'every row shows 7 recent days');
 check(titles.includes('Journal <b>tag</b>'), 'task text is HTML-escaped');
 check(await page.locator('.row.milestone').count() === 1, 'milestone styling on 21+ streak');
 check(await noHScroll(), 'home: no horizontal scroll');
@@ -125,7 +129,8 @@ await stretchRow.locator('.check').click();
 await page.waitForFunction(() => [...document.querySelectorAll('.list .row')].some((r) => r.textContent.includes('Stretch') && r.querySelector('.check.on')));
 check((await stretchRow.locator('.row-streak').textContent()).trim() === '4', 'tick bumps streak 3 → 4 instantly');
 check(posts.some((p) => p.endsWith('/tasks/bbbb-2/score/up')), 'tick sends POST score/up');
-check(!(await page.textContent('.risk:not(.twice)')).includes('Stretch'), 'ticked daily leaves the at-risk banner');
+check(!(await page.textContent('.attention')).includes('Stretch'), 'ticked daily leaves needs-attention');
+check((await page.textContent('.list[data-group=done]')).includes('Stretch'), 'ticked daily moves to Done');
 check(await page.locator('#toast .toast-btn').textContent() === 'Undo', 'tick shows an Undo toast');
 await page.click('#toast .toast-btn');
 await page.waitForFunction(() => [...document.querySelectorAll('.list .row')].some((r) => r.textContent.includes('Stretch') && !r.querySelector('.check.on') && !r.querySelector('.check.pending')));
@@ -159,9 +164,8 @@ check((await stretchRow.locator('.row-streak').textContent()).trim() === '4', 'b
 
 // 4. Sort toggle
 await page.click('[data-sort=name]');
-check((await page.locator('.row-title').first().textContent()) === 'Bike clean', 'sort by name');
-await page.click('[data-sort=due]');
-check((await page.locator('.row-title').first().textContent()) === 'Meditate', 'sort by due today (open first)');
+const byName = await page.locator('.list[data-group=todo] .row-title').allTextContents();
+check(byName.join('|') === [...byName].sort((a, b) => a.localeCompare(b)).join('|'), `sort by name within groups (${byName.join(' | ')})`);
 await page.click('[data-sort=streak]');
 
 // 5. Detail view
@@ -174,6 +178,12 @@ check(await page.locator('.heat i.done').count() >= 8, 'heatmap has done cells')
 check(await page.locator('.heat i.missed').count() >= 2, 'heatmap has missed cells');
 check((await page.textContent('.breaks')).includes('7'), 'break history lists lost 7-day streak');
 check(await noHScroll(), 'detail: no horizontal page scroll');
+check(await page.locator('.trends .chart svg').count() === 2, 'detail: streak-line and weekly charts');
+check(await page.locator('.trends .line').count() === 1 && await page.locator('.trends .col').count() >= 1, 'detail charts have data marks');
+check(await page.locator('.trends .xhair[visibility=visible]').count() === 0, 'crosshair hidden until you tap');
+await page.locator('.trends .chart').nth(1).locator('.hit').last().click();
+await page.waitForSelector('.chart-tip:not([hidden])');
+check((await page.textContent('.chart-tip')).includes('Week of'), 'tapping a column shows a tooltip');
 await shot('03-detail');
 
 // 5b. Checklist toggle on Stretch
@@ -188,7 +198,7 @@ check(posts.some((p) => p.endsWith('/tasks/bbbb-2/checklist/cl-2/score')), 'chec
 await page.goto(BASE + '#/t/cccc-3');
 await page.waitForSelector('#cue-form');
 check((await page.textContent('#cue-form')).includes('usually tick this around'), 'detail shows usual time');
-check(/reach 21 days on/i.test(await page.textContent('.card')) || /reach 7 days on/i.test(await page.textContent('body')), 'milestone forecast shown');
+check(/On track for \d+ days on/.test(await page.textContent('.detail-hero')), 'milestone forecast shown');
 await page.fill('#cue-form input[name=cue]', 'After lunch, on the balcony');
 await page.fill('#cue-form input[name=mini]', 'Three slow breaths');
 await page.click('#cue-form button[type=submit]');
@@ -238,6 +248,9 @@ await shot('03c0-review');
 check(/\d+%/.test(await page.textContent('.hero-num')), 'insights: completion rate shown');
 check(await page.locator('.rates li').count() >= 4, 'insights: per-daily rates');
 check(await page.locator('.heat i.done').count() > 0, 'insights: consistency calendar');
+check(await page.locator('.trends .col').count() >= 4, 'insights: overall weekly trend chart');
+check(await page.locator('table.months tbody tr').count() >= 2, 'insights: month-by-month table');
+check(await page.locator('.rates .spark').count() >= 4, 'insights: per-daily sparklines');
 check((await page.textContent('body')).includes('Why you miss'), 'insights: miss reasons card');
 await page.click('[data-period="30"]');
 check((await page.textContent('.hero-label b')).includes('30 days'), 'insights: 30-day toggle');
@@ -267,7 +280,7 @@ check(posts.some((p) => p.endsWith('/user/sleep')), 'Rest in the Inn sends POST 
 await page.click('#nav a[data-nav=home]');
 await page.waitForSelector('.rescue.rest');
 check((await page.textContent('.rescue.rest')).includes('Resting in the Inn'), 'home shows resting banner');
-check(await page.locator('section.risk, .pill.risk').count() === 0, 'no streak warnings while resting');
+check(await page.locator('.attention, .pill.risk').count() === 0, 'no streak warnings while resting');
 await shot('04b-inn');
 page.once('dialog', (d) => d.accept());
 await page.click('.rescue.rest [data-action=sleep]');

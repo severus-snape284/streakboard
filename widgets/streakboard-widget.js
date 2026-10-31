@@ -4,7 +4,10 @@
 // Setup: paste this into a new Scriptable script, run it once in the app to enter your
 // Habitica User ID + API token (stored in the iOS Keychain, never in this file), then add
 // a Scriptable widget and choose this script.
-// Optional widget parameter: "risk" shows at-risk/due dailies first instead of top streaks.
+// Optional widget parameter:
+//   (empty)        top streaks
+//   risk           at-risk / due dailies first
+//   <daily name>   a single daily, e.g. "Google" or "read emails" (matches part of the name)
 //
 // Smart reminders: whenever the widget refreshes (or you run the script), it schedules local
 // notifications only if dailies are still due, and clears them once everything is done.
@@ -70,6 +73,80 @@ function summarize(user, dailies, now) {
     toReset: nextRollover(today, tz, ds) - now,
     stale,
   };
+}
+
+// Per-day statuses from Habitica history. Mirrors analyzeHistory/historyToDays in js/streaks.js
+// (kept in step by tests/widget.test.mjs).
+function addDays(key, n) {
+  const d = new Date(key + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function analyzeHistory(dailies, lastCron, tz, ds) {
+  const cronStart = {};
+  const active = new Set();
+  const note = (ts, isCron) => {
+    const k = dayKey(ts, tz, ds);
+    active.add(k);
+    if (isCron && (!cronStart[k] || ts < cronStart[k])) cronStart[k] = ts;
+  };
+  for (const t of dailies) for (const h of t.history || []) note(Number(h.date), !h.completed);
+  if (lastCron) note(Date.parse(lastCron), true);
+  return { cronStart, activeDays: [...active].sort() };
+}
+
+function historyToDays(task, a, tz, ds) {
+  const RANK = { done: 4, missed: 3, rest: 2, notdue: 0 };
+  const days = {};
+  const set = (k, st) => { if (!days[k] || RANK[st] > RANK[days[k]]) days[k] = st; };
+  let prevValue = null;
+  for (const h of [...(task.history || [])].sort((x, y) => x.date - y.date)) {
+    if (h.completed === undefined && h.isDue === undefined) continue;
+    const ts = Number(h.date);
+    const k = dayKey(ts, tz, ds);
+    const prev = a.activeDays.filter((d) => d < k).pop() || addDays(k, -1);
+    if (h.completed) set(a.cronStart[k] && ts < a.cronStart[k] ? prev : k, 'done');
+    else {
+      const closed = h.isDue && days[prev] === 'done' ? addDays(k, -1) : prev;
+      const rest = h.isDue && prevValue != null && h.value === prevValue;
+      set(closed, !h.isDue ? 'notdue' : rest ? 'rest' : 'missed');
+    }
+    prevValue = h.value;
+  }
+  return days;
+}
+
+function bestStreak(days, current) {
+  let cur = 0, best = 0;
+  for (const k of Object.keys(days).sort()) {
+    if (days[k] === 'done') best = Math.max(best, ++cur);
+    else if (days[k] === 'missed') cur = 0;
+  }
+  return Math.max(best, current);
+}
+
+const MILESTONES = [7, 21, 30, 66, 100, 365];
+
+/** Everything the single-daily widget shows. */
+function dailyDetail(task, all, user, now) {
+  const tz = user.preferences?.timezoneOffset ?? 0;
+  const ds = user.preferences?.dayStart ?? 0;
+  const today = user.lastCron ? dayKey(Date.parse(user.lastCron), tz, ds) : dayKey(now, tz, ds);
+  const days = historyToDays(task, analyzeHistory(all, user.lastCron, tz, ds), tz, ds);
+  const last7 = [];
+  for (let i = 6; i >= 0; i--) {
+    const k = addDays(today, -i);
+    last7.push(i === 0 ? (task.completed ? 'done' : task.isDue ? 'due' : 'notdue') : days[k] && days[k] !== '' ? days[k] : '');
+  }
+  const next = MILESTONES.find((m) => m > task.streak) || null;
+  const s = summarize(user, all, now);
+  return { best: bestStreak(Object.fromEntries(Object.entries(days).filter(([k]) => k < today)), task.streak), last7, next, left: s.left, stale: s.stale };
+}
+
+function findDaily(dailies, query) {
+  const q = query.toLowerCase();
+  return dailies.find((t) => plain(t.text).toLowerCase() === q) || dailies.find((t) => plain(t.text).toLowerCase().includes(q)) || null;
 }
 
 function plain(text) {
@@ -178,7 +255,10 @@ async function loadData() {
     const slim = {
       at: Date.now(),
       user: { preferences: user.preferences, lastCron: user.lastCron },
-      dailies: dailies.map((t) => ({ text: t.text, streak: t.streak || 0, isDue: !!t.isDue, completed: !!t.completed })),
+      dailies: dailies.map((t) => ({
+        text: t.text, streak: t.streak || 0, isDue: !!t.isDue, completed: !!t.completed,
+        history: (t.history || []).map((h) => ({ date: h.date, value: h.value, isDue: h.isDue, completed: h.completed })),
+      })),
     };
     fm.writeString(path, JSON.stringify(slim));
     return slim;
@@ -241,9 +321,112 @@ function taskRow(w, t, size = 13) {
   txt(r, t.streak, size + 1, t.streak ? C.text : C.muted, { rounded: true });
 }
 
-function buildWidget(data, family, param, now) {
+const DOT = { done: C.done, missed: C.risk, notdue: C.muted, rest: new Color('#5b8ac7'), due: C.due, '': new Color('#3a3a46') };
+
+function dotsRow(stack, statuses, size, mono = false) {
+  const r = stack.addStack();
+  r.spacing = 3;
+  statuses.forEach((st, i) => {
+    const t = r.addText(st === 'due' ? '□' : '■');
+    t.font = Font.systemFont(size);
+    t.textColor = mono ? (st === 'done' ? Color.white() : new Color('#ffffff', 0.35)) : DOT[st] || DOT[''];
+    if (i === statuses.length - 1 && !mono) t.font = Font.boldSystemFont(size);
+  });
+  return r;
+}
+
+function statusText(task, d) {
+  if (task.completed) return ['✓ Done today', C.done];
+  if (task.isDue) return [d.stale ? 'Due · new day pending' : `Due · ${fmtLeft(d.left)} left`, task.streak >= 3 ? C.risk : C.due];
+  return ['Not due today', C.muted];
+}
+
+function buildSingle(data, task, family, now) {
+  const d = dailyDetail(task, data.dailies, data.user, now);
+  const w = new ListWidget();
+  w.url = APP_URL;
+  w.refreshAfterDate = new Date(now + 15 * 60000);
+  const name = plain(task.text);
+  const [status, statusColorV] = statusText(task, d);
+
+  if (family === 'accessoryInline') {
+    w.addText(`🔥${task.streak} ${name}${task.completed ? ' ✓' : ''}`);
+    return w;
+  }
+  if (family === 'accessoryCircular') {
+    w.addAccessoryWidgetBackground = true;
+    const st = w.addStack();
+    st.layoutVertically();
+    st.centerAlignContent();
+    const top = st.addStack();
+    top.addSpacer();
+    flame(top, 12, Color.white());
+    top.addSpacer();
+    const n = st.addStack();
+    n.addSpacer();
+    txt(n, task.streak, 20, Color.white(), { rounded: true });
+    n.addSpacer();
+    txt(st, task.completed ? 'done' : 'days', 9, Color.white());
+    return w;
+  }
+  if (family === 'accessoryRectangular') {
+    const r = w.addStack();
+    r.centerAlignContent();
+    flame(r, 14, Color.white());
+    r.addSpacer(3);
+    txt(r, `${task.streak}  ${name}`, 15, Color.white(), { rounded: true });
+    txt(w, task.completed ? 'Done today ✓' : task.isDue ? (d.stale ? 'Due' : `Due · ${fmtLeft(d.left)} left`) : 'Not due today', 12, Color.white());
+    dotsRow(w, d.last7, 10, true);
+    return w;
+  }
+
+  w.backgroundColor = C.bg;
+  w.setPadding(14, 14, 14, 14);
+  const body = family === 'small' ? w : w.addStack();
+  const left = family === 'small' ? w : body.addStack();
+  if (family !== 'small') { body.layoutHorizontally(); left.layoutVertically(); }
+  txt(left, name, 13, C.muted, { bold: true, lines: 2 });
+  left.addSpacer();
+  const big = left.addStack();
+  big.centerAlignContent();
+  flame(big, 28, task.streak ? C.flame : C.muted);
+  big.addSpacer(2);
+  txt(big, task.streak, 44, task.streak ? C.text : C.muted, { rounded: true });
+  txt(left, `day streak · best ${d.best}`, 11, C.muted);
+  left.addSpacer(6);
+  dotsRow(left, d.last7, 11);
+  left.addSpacer(4);
+  txt(left, status, 11, statusColorV, { bold: true });
+  if (family !== 'small') {
+    body.addSpacer();
+    const right = body.addStack();
+    right.layoutVertically();
+    if (d.next) {
+      txt(right, 'Next milestone', 11, C.muted);
+      txt(right, `${d.next - task.streak} to go`, 22, C.text, { rounded: true });
+      txt(right, `→ ${d.next} days`, 11, C.muted);
+      right.addSpacer(8);
+    }
+    txt(right, 'Best ever', 11, C.muted);
+    const b = right.addStack();
+    b.centerAlignContent();
+    flame(b, 14);
+    b.addSpacer(2);
+    txt(b, d.best, 22, C.text, { rounded: true });
+    right.addSpacer();
+  }
+  return w;
+}
+
+function buildWidget(data, family, rawParam, now) {
+  const param = (rawParam || '').trim();
+  if (param && param.toLowerCase() !== 'risk') {
+    const task = findDaily(data.dailies, param);
+    if (!task) return errorWidget(`No daily matches "${param}". Set the widget parameter to part of a daily's name.`);
+    return buildSingle(data, task, family, now);
+  }
   const s = summarize(data.user, data.dailies, now);
-  const list = param === 'risk' ? s.byRisk : s.byStreak;
+  const list = param.toLowerCase() === 'risk' ? s.byRisk : s.byStreak;
   const w = new ListWidget();
   w.url = APP_URL;
   w.refreshAfterDate = new Date(now + 15 * 60000);
@@ -315,7 +498,7 @@ async function main() {
     const now = Date.now();
     // Only (re)plan reminders from fresh data, never from the offline cache.
     if (!data.cached) await syncReminders(planReminders(summarize(data.user, data.dailies, now), now));
-    w = buildWidget(data, config.widgetFamily || 'medium', (args.widgetParameter || '').trim().toLowerCase(), now);
+    w = buildWidget(data, config.widgetFamily || 'medium', (args.widgetParameter || '').trim(), now);
   } catch (e) {
     w = errorWidget(e.message);
   }
