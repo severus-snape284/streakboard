@@ -53,7 +53,8 @@ iOS doesn't allow widgets for web apps, so `widgets/streakboard-widget.js` is a 
 
 1. Install Scriptable. In Streakboard, go to **Settings → Copy widget script**. In Scriptable, tap **+**, paste, and name it "Streakboard".
 2. Run it once in Scriptable and enter your User ID and API token.
-3. Add a Scriptable widget (small, medium or large, or a Lock Screen size), tap it, and choose the **Streakboard** script.
+3. Add a Scriptable widget (small, medium or large, or a Lock Screen size). Then **long-press it → Edit Widget →
+   Script → Streakboard**. If it says "Configure widget to select the script to run", this step hasn't been done yet.
    Set the widget parameter to `risk` to list at-risk and due dailies first instead of top streaks.
 
 iOS decides when widgets refresh (roughly every 15 to 30 minutes). Tapping the widget opens Streakboard in Safari,

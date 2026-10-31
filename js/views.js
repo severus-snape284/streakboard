@@ -428,7 +428,8 @@ export function settingsView(state, setup, creds) {
         <li>Install <b>Scriptable</b> from the App Store.</li>
         <li>Tap <b>Copy widget script</b> below. In Scriptable, tap <b>+</b>, paste, and name it "Streakboard".</li>
         <li>Run it once (▶) and enter your User ID and API token. They're saved in the iOS Keychain.</li>
-        <li>Long-press your Home Screen → <b>+</b> → Scriptable → pick a size → tap the widget → Script: <b>Streakboard</b>. Optional parameter: <code>risk</code> shows at-risk dailies first.</li>
+        <li>Long-press your Home Screen → <b>+</b> → Scriptable → pick a size → <b>Add Widget</b>.</li>
+        <li>Then <b>long-press the new widget → Edit Widget</b> → Script: <b>Streakboard</b>, and tap outside to close. (Just tapping the widget opens Scriptable instead.) Optional parameter: <code>risk</code> shows at-risk dailies first.</li>
         <li>Lock Screen: customise it → add a Scriptable widget → choose Streakboard.</li>
       </ol>
       <button class="btn" data-action="copy-widget">Copy widget script</button>
