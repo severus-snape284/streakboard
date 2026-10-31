@@ -204,5 +204,22 @@ test('miss reasons: unexplained misses and stats; prefs merge', async () => {
   assert.deepEqual(stats, [{ reason: 'Forgot', n: 2 }, { reason: 'Tired', n: 1 }]);
   const { mergePrefs } = await import('../js/model.js');
   const m = mergePrefs({ cues: { a: 'mine' }, reasons: { a: { d1: 'Tired' } } }, { cues: { a: 'theirs', b: 'x' }, reasons: { a: { d2: 'Sick' } }, targets: { h: 3 } });
-  assert.deepEqual(m, { cues: { a: 'mine', b: 'x' }, targets: { h: 3 }, reasons: { a: { d1: 'Tired', d2: 'Sick' } } });
+  assert.deepEqual(m, { cues: { a: 'mine', b: 'x' }, minis: {}, focus: null, targets: { h: 3 }, reasons: { a: { d1: 'Tired', d2: 'Sick' } } });
+});
+
+test('weekly review: wins, slips with reasons, suggestion; focus progress', () => {
+  const today = '2026-10-31';
+  const a = { id: 'a', text: 'A', streak: 9, days: { '2026-10-25': 'done', '2026-10-30': 'done' } };
+  const b = { id: 'b', text: 'B', streak: 0, days: { '2026-10-26': 'missed', '2026-10-27': 'done', '2026-10-29': 'missed', '2026-10-31': 'due' } };
+  const c = { id: 'c', text: 'C', streak: 1, days: { '2026-10-28': 'missed', '2026-10-29': 'done', '2026-10-30': 'done' } };
+  const r = I.weeklyReview([a, b, c], { b: { '2026-10-26': 'Tired', '2026-10-01': 'Old' } }, today);
+  assert.deepEqual(r.wins.map((x) => x.task.id), ['a']);
+  assert.deepEqual(r.slips.map((x) => x.task.id), ['b', 'c']);
+  assert.deepEqual(r.slips[0].why, ['Tired']);
+  assert.equal(r.suggestion.id, 'b');
+  assert.equal(r.from, '2026-10-24');
+  assert.deepEqual(I.focusProgress(b, '2026-10-27', today), { done: 1, missed: 1, due: 2, rate: 0.5 });
+  assert.equal(I.focusExpired({ taskId: 'b', since: '2026-10-24' }, today), true);
+  assert.equal(I.focusExpired({ taskId: 'b', since: '2026-10-25' }, today), false);
+  assert.equal(I.focusExpired(null, today), true);
 });

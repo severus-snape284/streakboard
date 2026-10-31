@@ -362,3 +362,27 @@ body.setup #nav { display: none; }
 .small-btn { width: auto; min-height: 50px; flex: none; }
 .seg button { font-size: 13px; }
 #cue-form input { font-family: inherit; }
+.steps { margin: 0 0 14px; padding-left: 20px; font-size: 14px; color: var(--muted); }
+.steps li { margin-bottom: 6px; }
+.steps b, .steps code { color: var(--text); }
+a.btn { color: var(--text); }
+
+/* v2.2: undo, focus, review, 2-minute version */
+#toast { display: flex; align-items: center; gap: 12px; }
+#toast[hidden] { display: none; }
+.toast-btn { border: 0; background: transparent; color: var(--flame); font-weight: 800; min-height: 36px; padding: 0 4px; cursor: pointer; }
+.mini { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.risk li a span:first-child { min-width: 0; }
+.focus {
+  display: block; text-decoration: none; background: var(--surface); border: 1px solid color-mix(in srgb, var(--flame-2) 50%, var(--line));
+  border-radius: var(--radius); padding: 12px 14px; margin-bottom: 14px;
+}
+.focus.prompt { border-style: dashed; color: var(--muted); }
+.focus-label { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--flame-2); font-weight: 700; margin-bottom: 4px; }
+.focus .num { display: inline-flex; align-items: center; gap: 2px; font-size: 20px; }
+.review h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; }
+.review-stats { display: flex; gap: 18px; font-size: 14px; color: var(--muted); }
+.review-stats b { color: var(--text); font-size: 20px; }
+.plain { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+.plain li { padding: 4px 0; }
+.chip.on { background: color-mix(in srgb, var(--flame) 30%, var(--surface-2)); border-color: var(--flame); }

@@ -154,6 +154,8 @@ export function mergePrefs(a = {}, b = {}) {
   for (const [id, byDay] of Object.entries(b.reasons || {})) reasons[id] = { ...(reasons[id] || {}), ...byDay };
   return {
     cues: { ...(b.cues || {}), ...(a.cues || {}) },
+    minis: { ...(b.minis || {}), ...(a.minis || {}) },
+    focus: a.focus || b.focus || null,
     targets: { ...(b.targets || {}), ...(a.targets || {}) },
     reasons,
   };

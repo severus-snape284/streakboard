@@ -15,7 +15,7 @@ const state = {
   badge: localStorage.getItem('sb.badge') === '1',
   persisted: null,
   pending: new Set(), // task ids with a write in flight
-  prefs: { cues: {}, reasons: {}, targets: {} }, // user-entered, device-local
+  prefs: { cues: {}, reasons: {}, targets: {}, minis: {} }, // user-entered, device-local
 };
 
 // ---------- routing ----------
@@ -162,11 +162,11 @@ async function optimistic(kind, id, apply, revert, call) {
   }
 }
 
-async function toggleDaily(id) {
+async function toggleDaily(id, { skipConfirm = false } = {}) {
   const t = state.view?.tasks.find((x) => x.id === id);
   if (!t) return;
   const up = !t.completed;
-  if (!up && !confirm(`Mark "${t.text}" as not done? This lowers its streak by one.`)) return;
+  if (!up && !skipConfirm && !confirm(`Mark "${t.text}" as not done? This lowers its streak by one.`)) return;
   const before = { completed: t.completed, streak: t.streak };
   const ok = await optimistic('daily', id,
     (it) => { it.completed = up; it.streak = Math.max(0, it.streak + (up ? 1 : -1)); },
@@ -174,6 +174,7 @@ async function toggleDaily(id) {
     (creds) => store.scoreTask(creds, id, up ? 'up' : 'down'));
   if (ok && up) {
     const day = state.view.ctx.cronDay;
+    toast(`${t.text}: ${before.streak + 1}-day streak`, 5000, { label: 'Undo', run: () => toggleDaily(id, { skipConfirm: true }) });
     celebrate(crossedMilestones(before.streak, before.streak + 1).map((m) => ({ taskId: id, text: t.text, m, day })));
   }
 }
@@ -247,6 +248,12 @@ app.addEventListener('click', async (ev) => {
   else if (action === 'habit') plusHabit(id);
   else if (action === 'cron') startNewDay();
   else if (action === 'badge') toggleBadge();
+  else if (action === 'copy-widget') copyWidgetScript();
+  else if (action === 'focus') {
+    state.prefs = await store.updatePrefs((p) => { p.focus = id ? { taskId: id, since: state.view.ctx.cronDay } : null; });
+    toast(id ? 'Focus set for this week' : 'Focus cleared');
+    render();
+  }
   else if (action === 'reason') {
     const { day, reason } = btn.dataset;
     state.prefs = await store.updatePrefs((p) => { (p.reasons[id] ||= {})[day] = reason; });
@@ -287,9 +294,15 @@ app.addEventListener('submit', async (ev) => {
   if (ev.target.id === 'cue-form') {
     ev.preventDefault();
     const id = ev.target.dataset.id;
-    const cue = String(new FormData(ev.target).get('cue') || '').trim();
-    state.prefs = await store.updatePrefs((p) => { if (cue) p.cues[id] = cue; else delete p.cues[id]; });
-    toast(cue ? 'Plan saved' : 'Plan cleared');
+    const f = new FormData(ev.target);
+    const cue = String(f.get('cue') || '').trim();
+    const mini = String(f.get('mini') || '').trim();
+    state.prefs = await store.updatePrefs((p) => {
+      if (cue) p.cues[id] = cue; else delete p.cues[id];
+      p.minis ||= {};
+      if (mini) p.minis[id] = mini; else delete p.minis[id];
+    });
+    toast(cue || mini ? 'Plan saved' : 'Plan cleared');
     render();
     return;
   }
@@ -328,6 +341,25 @@ app.addEventListener('change', async (ev) => {
   }
   ev.target.value = '';
 });
+
+async function copyWidgetScript() {
+  const fetchText = () => fetch('widgets/streakboard-widget.js', { cache: 'no-store' }).then((r) => {
+    if (!r.ok) throw new Error('Could not load the script');
+    return r.text();
+  });
+  try {
+    // Safari keeps the tap's permission only if the clipboard write starts right away,
+    // so hand it a promise instead of awaiting the fetch first.
+    if (window.ClipboardItem && navigator.clipboard?.write) {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': fetchText().then((t) => new Blob([t], { type: 'text/plain' })) })]);
+    } else {
+      await navigator.clipboard.writeText(await fetchText());
+    }
+    toast('Widget script copied. Paste it into Scriptable.', 3500);
+  } catch {
+    toast('Copy failed. Use "View script" and copy it from there.', 4000);
+  }
+}
 
 async function exportBackup() {
   const data = await store.exportBackup();

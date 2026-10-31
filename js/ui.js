@@ -22,9 +22,17 @@ export const REFRESH_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d
 export const CHECK_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 16.2 5.3 12l-1.4 1.4 5.6 5.6L20.1 8.4 18.7 7z"/></svg>';
 export const PLUS_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>';
 
-export function toast(msg, ms = 2800) {
+/** Show a toast; with `action` ({ label, run }) it gets a button, e.g. Undo. */
+export function toast(msg, ms = 2800, action = null) {
   const el = document.getElementById('toast');
   el.textContent = msg;
+  if (action) {
+    const b = document.createElement('button');
+    b.className = 'toast-btn';
+    b.textContent = action.label;
+    b.onclick = () => { el.hidden = true; action.run(); };
+    el.append(b);
+  }
   el.hidden = false;
   clearTimeout(toast.t);
   toast.t = setTimeout(() => (el.hidden = true), ms);

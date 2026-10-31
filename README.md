@@ -22,6 +22,10 @@ Keep using the official Habitica app to check things off. Streakboard is the sco
 - **Habit goals** (e.g. Gym 3× a week); a habit's streak counts periods where you hit the goal
 - **Milestone forecast**: the date you'll reach the next milestone if you keep going
 - **Consistency calendar** on Insights: all done / some / none, day by day
+- **Undo** for 5 seconds after ticking a daily
+- **2-minute version** per daily, shown in the at-risk banners so a busy day doesn't break the streak
+- **Weekly review** (wins, slips with reasons) and a **focus daily** for the week, pinned at the top of Streaks
+- **Home Screen & Lock Screen widget** via the free Scriptable app (see below)
 - Optional **app icon badge** with the number of dailies still due (iOS 16.4+, needs notification permission)
 - Pull-to-refresh, opens offline, last-updated timestamp
 - Export / Import a JSON backup
@@ -41,6 +45,19 @@ sent only to `habitica.com`. Use **Settings → Log out & clear credentials** to
 1. Open the site in **Safari**: `https://<your-github-username>.github.io/streakboard/`
 2. Tap **Share** → **Add to Home Screen** → **Add**.
 3. Open Streakboard from the Home Screen and enter your User ID and API token.
+
+## Widget (Home Screen & Lock Screen)
+
+iOS doesn't allow widgets for web apps, so `widgets/streakboard-widget.js` is a widget for the free
+[Scriptable](https://scriptable.app) app. It calls Habitica directly and keeps your credentials in the iOS Keychain.
+
+1. Install Scriptable. In Streakboard, go to **Settings → Copy widget script**. In Scriptable, tap **+**, paste, and name it "Streakboard".
+2. Run it once in Scriptable and enter your User ID and API token.
+3. Add a Scriptable widget (small, medium or large, or a Lock Screen size), tap it, and choose the **Streakboard** script.
+   Set the widget parameter to `risk` to list at-risk and due dailies first instead of top streaks.
+
+iOS decides when widgets refresh (roughly every 15 to 30 minutes). Tapping the widget opens Streakboard in Safari,
+because iOS doesn't let widgets open a Home Screen web app directly.
 
 ## Local development
 

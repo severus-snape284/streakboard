@@ -125,6 +125,12 @@ await page.waitForFunction(() => [...document.querySelectorAll('.list .row')].so
 check((await stretchRow.locator('.row-streak').textContent()).trim() === '4', 'tick bumps streak 3 → 4 instantly');
 check(posts.some((p) => p.endsWith('/tasks/bbbb-2/score/up')), 'tick sends POST score/up');
 check(!(await page.textContent('.risk:not(.twice)')).includes('Stretch'), 'ticked daily leaves the at-risk banner');
+check(await page.locator('#toast .toast-btn').textContent() === 'Undo', 'tick shows an Undo toast');
+await page.click('#toast .toast-btn');
+await page.waitForFunction(() => [...document.querySelectorAll('.list .row')].some((r) => r.textContent.includes('Stretch') && !r.querySelector('.check.on') && !r.querySelector('.check.pending')));
+check(posts.some((p) => p.endsWith('/tasks/bbbb-2/score/down')), 'Undo sends score/down without a confirm');
+await stretchRow.locator('.check').click();
+await page.waitForFunction(() => [...document.querySelectorAll('.list .row')].some((r) => r.textContent.includes('Stretch') && r.querySelector('.check.on') && !r.querySelector('.check.pending')));
 
 // 3c. Milestone celebration: Floss 6 → 7
 await page.locator('.list .row', { hasText: 'Floss' }).locator('.check').click();
@@ -183,6 +189,7 @@ await page.waitForSelector('#cue-form');
 check((await page.textContent('#cue-form')).includes('usually tick this around'), 'detail shows usual time');
 check(/reach 21 days on/i.test(await page.textContent('.card')) || /reach 7 days on/i.test(await page.textContent('body')), 'milestone forecast shown');
 await page.fill('#cue-form input[name=cue]', 'After lunch, on the balcony');
+await page.fill('#cue-form input[name=mini]', 'Three slow breaths');
 await page.click('#cue-form button[type=submit]');
 await page.waitForFunction(() => document.getElementById('toast').textContent.includes('Plan saved'));
 check(await page.locator('.why .chip').count() > 0, 'unexplained misses ask why');
@@ -219,6 +226,12 @@ await shot('03b-habits');
 await page.click('#nav a[data-nav=insights]');
 await page.waitForSelector('.bars');
 check(await page.locator('.bar').count() === 7, 'insights: weekday bars');
+check((await page.textContent('.review')).includes('Weekly review'), 'insights: weekly review card');
+check((await page.textContent('.review')).includes('Wins') && (await page.textContent('.review')).includes('Slips'), 'review lists wins and slips');
+await page.locator('.review .chip', { hasText: 'Meditate' }).click();
+await page.waitForFunction(() => document.querySelector('.review h3:last-of-type').textContent.includes('Focus: Meditate'));
+check(true, 'focus chosen from weekly review');
+await shot('03c0-review');
 check(/\d+%/.test(await page.textContent('.hero-num')), 'insights: completion rate shown');
 check(await page.locator('.rates li').count() >= 4, 'insights: per-daily rates');
 check(await page.locator('.heat i.done').count() > 0, 'insights: consistency calendar');
@@ -228,10 +241,19 @@ check((await page.textContent('.hero-label b')).includes('30 days'), 'insights: 
 check(await noHScroll(), 'insights: no horizontal scroll');
 await shot('03c-insights');
 
+// 5e. Focus card pinned on home; 2-minute version shown where it matters
+await page.click('#nav a[data-nav=home]');
+await page.waitForSelector('.focus');
+check((await page.textContent('.focus')).includes("This week's focus") && (await page.textContent('.focus')).includes('Meditate'), 'focus card pinned on home');
+check((await page.textContent('.list .row:has-text("Meditate")')).includes('Focus'), 'focus pill on the row');
+
 // 6. Settings
 await page.click('#nav a[data-nav=settings]');
 await page.waitForSelector('[data-action=export]');
 check(await noHScroll(), 'settings: no horizontal scroll');
+check((await page.textContent('body')).includes('Scriptable'), 'settings: widget setup instructions');
+const widgetSrc = await page.evaluate(() => fetch('widgets/streakboard-widget.js').then((r) => r.text()));
+check(widgetSrc.includes('ListWidget'), 'widget script is served with the app');
 await shot('04-settings');
 
 // 7. Export produces a backup file

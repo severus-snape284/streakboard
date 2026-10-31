@@ -262,3 +262,43 @@ export function reasonStats(reasonsByTask = {}, from = '0000-00-00') {
   }
   return Object.entries(counts).map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n);
 }
+
+// ---------- weekly review & focus ----------
+
+function rangeCounts(days, from, to) {
+  let done = 0, missed = 0;
+  for (const [k, v] of Object.entries(days || {})) {
+    if (k < from || k > to) continue;
+    if (v === 'done') done++; else if (v === 'missed') missed++;
+  }
+  return { done, missed, due: done + missed };
+}
+
+/**
+ * Review of the last 7 closed days: wins (every due day done), slips (with any
+ * reasons logged) and a suggested focus (the slip with the lowest completion rate).
+ */
+export function weeklyReview(tasks, reasonsByTask = {}, today) {
+  const from = addDays(today, -7), to = addDays(today, -1);
+  const rows = tasks.map((t) => ({ task: t, ...rangeCounts(t.days, from, to) })).filter((r) => r.due > 0);
+  const wins = rows.filter((r) => r.missed === 0).sort((a, b) => b.task.streak - a.task.streak);
+  const slips = rows.filter((r) => r.missed > 0).map((r) => {
+    const why = Object.entries(reasonsByTask[r.task.id] || {}).filter(([k]) => k >= from && k <= to).map(([, v]) => v);
+    return { ...r, rate: r.done / r.due, why };
+  }).sort((a, b) => a.rate - b.rate || b.missed - a.missed);
+  const roll = dayRollup(tasks, today);
+  const perfect = Object.entries(roll).filter(([k, r]) => k >= from && k <= to && r.perfect).length;
+  const done = rows.reduce((s, r) => s + r.done, 0), due = rows.reduce((s, r) => s + r.due, 0);
+  return { from, to, wins, slips, perfect, rate: due ? done / due : null, suggestion: slips[0]?.task || null };
+}
+
+/** Focus progress since it was chosen (days up to and including today). */
+export function focusProgress(task, since, today) {
+  const c = rangeCounts(task.days, since, today);
+  return { ...c, rate: c.due ? c.done / c.due : null };
+}
+
+/** A focus lasts a week; after that the review suggests picking a new one. */
+export function focusExpired(focus, today) {
+  return !focus?.taskId || addDays(focus.since, 7) <= today;
+}

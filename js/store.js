@@ -76,7 +76,7 @@ export const exportBackup = () => db.exportAll();
 export const importBackup = (json) => db.importAll(json, mergeObserved, mergePrefs);
 
 export async function getPrefs() {
-  return { cues: {}, reasons: {}, targets: {}, ...((await db.kvGet('prefs')) || {}) };
+  return { cues: {}, reasons: {}, targets: {}, minis: {}, focus: null, ...((await db.kvGet('prefs')) || {}) };
 }
 /** Read-modify-write the prefs record; returns the updated prefs. */
 export async function updatePrefs(fn) {

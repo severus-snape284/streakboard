@@ -6,7 +6,7 @@ built yet. Read all of it before starting.
 
 ## Status
 
-- **Phase 0 done, v1, v2 and v2.1 built and live (2026-10-31):** https://severus-snape284.github.io/streakboard/
+- **Phase 0 done, v1 through v2.2 built and live (2026-10-31):** https://severus-snape284.github.io/streakboard/
 - v2 + consistency extras shipped (owner asked for "all additions that help me be consistent"): tick
   dailies/checklists with optimistic UI, streak rescue + `POST /cron`, countdown/progress ring,
   don't-miss-twice, perfect days, Insights tab, Habits tab, milestone celebrations, app badge.
@@ -17,6 +17,10 @@ built yet. Read all of it before starting.
   `nextDue`; overall consistency calendar. User-entered data lives in IndexedDB kv `prefs`
   ({cues, reasons, targets}), is exported/imported, and survives "Delete local streak history".
 - Pages is enabled and deploying (owner set Source = GitHub Actions).
+- v2.2: widget for the Scriptable app (`widgets/streakboard-widget.js`, Keychain creds, offline cache,
+  tested via a stubbed Scriptable API in `tests/widget.test.mjs`; PWAs can't have native widgets);
+  undo toast after ticking; 2-minute version per daily (`prefs.minis`); weekly review + focus daily
+  (`prefs.focus = {taskId, since}`, lasts 7 days). The SW only serves the app shell for app routes, not file URLs.
 - Verified in Habitica source (`website/server/libs/cron.js`, `common/script/ops/scoreTask.js`):
   GET requests do NOT run cron (only `POST /cron`); score up = streak+1 + history push;
   score down = streak−1 + removes last history entry.
