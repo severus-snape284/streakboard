@@ -64,14 +64,19 @@ function prevActive(activeDays, k) {
   return ans;
 }
 
-/** Convert one daily's history into per-day statuses: 'done' | 'missed' | 'notdue'. */
+const RANK = { done: 4, missed: 3, rest: 2, due: 1, notdue: 0 };
+
+/**
+ * Convert one daily's history into per-day statuses: 'done' | 'missed' | 'rest' | 'notdue'.
+ * A due-but-unticked cron entry whose value didn't drop means Habitica skipped the
+ * penalty, which happens while resting in the Inn, and the streak survives. That's 'rest' (neutral).
+ */
 export function historyToDays(task, { cronStart, activeDays, tzOffsetMin = 0, dayStart = 0 }) {
   const days = {};
   const set = (key, status) => {
-    const prev = days[key];
-    // done beats missed beats notdue
-    if (!prev || status === 'done' || (status === 'missed' && prev === 'notdue')) days[key] = status;
+    if (!days[key] || RANK[status] > RANK[days[key]]) days[key] = status;
   };
+  let prevValue = null;
   const hist = [...(task.history || [])].sort((a, b) => a.date - b.date);
   for (const h of hist) {
     if (h.completed === undefined && h.isDue === undefined) continue; // compressed old entry
@@ -82,10 +87,12 @@ export function historyToDays(task, { cronStart, activeDays, tzOffsetMin = 0, da
       set(cronStart[k] && ts < cronStart[k] ? prev : k, 'done');
     } else {
       // If the previous active day is already done, a silent active day (no entries
-      // at all) must have happened in between — fall back to yesterday.
+      // at all) must have happened in between, so fall back to yesterday.
       const closed = h.isDue && days[prev] === 'done' ? addDays(k, -1) : prev;
-      set(closed, h.isDue ? 'missed' : 'notdue');
+      const rest = h.isDue && prevValue != null && h.value === prevValue;
+      set(closed, !h.isDue ? 'notdue' : rest ? 'rest' : 'missed');
     }
+    prevValue = h.value;
   }
   return days;
 }

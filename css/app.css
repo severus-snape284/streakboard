@@ -16,6 +16,7 @@
   --cell-missed: #6b2a2f;
   --cell-done: #ff8a3d;
   --cell-part: #8a4a22;
+  --cell-rest: #2f4a6b;
   --radius: 18px;
   --nav-h: 64px;
   --safe-t: env(safe-area-inset-top, 0px);
@@ -44,6 +45,7 @@
     --cell-missed: #f1b9b9;
     --cell-done: #f0701e;
     --cell-part: #f7c39e;
+    --cell-rest: #b9cde6;
     color-scheme: light;
   }
 }
@@ -386,3 +388,7 @@ a.btn { color: var(--text); }
 .plain { list-style: none; margin: 0; padding: 0; font-size: 14px; }
 .plain li { padding: 4px 0; }
 .chip.on { background: color-mix(in srgb, var(--flame) 30%, var(--surface-2)); border-color: var(--flame); }
+
+/* v2.3 */
+.heat i.rest { background: var(--cell-rest); }
+.rescue.rest { background: color-mix(in srgb, var(--cell-rest) 30%, var(--surface)); border-color: color-mix(in srgb, var(--cell-rest) 70%, transparent); }

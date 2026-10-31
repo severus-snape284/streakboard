@@ -30,7 +30,7 @@ export function timeCtx(user, now = Date.now()) {
   return { tz, ds, today, cronDay, stale: !!user?.needsCron || isCronStale(user?.lastCron, now, tz, ds) };
 }
 
-const RANK = { done: 3, missed: 2, due: 1, notdue: 0 };
+const RANK = { done: 4, missed: 3, rest: 2, due: 1, notdue: 0 };
 function unionDays(a = {}, b = {}) {
   const out = { ...a };
   for (const [k, v] of Object.entries(b)) if (!out[k] || RANK[v] > RANK[out[k]]) out[k] = v;

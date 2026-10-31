@@ -5,6 +5,13 @@
 // Habitica User ID + API token (stored in the iOS Keychain, never in this file), then add
 // a Scriptable widget and choose this script.
 // Optional widget parameter: "risk" shows at-risk/due dailies first instead of top streaks.
+//
+// Smart reminders: whenever the widget refreshes (or you run the script), it schedules local
+// notifications only if dailies are still due, and clears them once everything is done.
+// Change the times below. Scriptable asks for notification permission the first time.
+const REMINDERS = true;
+const EVENING_REMINDER = '21:00'; // your phone's local time, or '' to turn off
+const LAST_CALL_MINUTES = 90;      // minutes before your Habitica day resets, or 0 to turn off
 
 const APP_URL = 'https://severus-snape284.github.io/streakboard/';
 const API = 'https://habitica.com/api/v3';
@@ -60,6 +67,7 @@ function summarize(user, dailies, now) {
     open: open.length,
     active: dailies.filter((t) => t.streak > 0).length,
     left: stale ? null : nextRollover(today, tz, ds) - now,
+    toReset: nextRollover(today, tz, ds) - now,
     stale,
   };
 }
@@ -67,6 +75,58 @@ function summarize(user, dailies, now) {
 function plain(text) {
   // Habitica task text can contain markdown/emoji shortcodes; keep it readable.
   return String(text || '').replace(/[*_`~]/g, '').replace(/:([a-z0-9_+-]+):/g, '').trim();
+}
+
+// ---------- reminders ----------
+
+const REMINDER_IDS = ['streakboard-evening', 'streakboard-lastcall'];
+
+function reminderBody(s) {
+  if (s.stale) return "You haven't started your Habitica day yet. Open it and keep your streaks going.";
+  if (!s.open) return null;
+  const first = s.risk[0] || s.byStreak.find((t) => t.isDue && !t.completed);
+  const more = s.open - 1;
+  return `${plain(first.text)}${first.streak ? ` (${first.streak}-day streak)` : ''}${more ? ` and ${more} more` : ''} still due.`;
+}
+
+/** Notifications to schedule from now: [{ id, at: Date, title, body }]. */
+function planReminders(s, now) {
+  if (!REMINDERS) return [];
+  const body = reminderBody(s);
+  if (!body) return [];
+  const out = [];
+  const m = /^(\d{1,2}):(\d{2})$/.exec(EVENING_REMINDER || '');
+  if (m) {
+    const at = new Date(now);
+    at.setHours(Number(m[1]), Number(m[2]), 0, 0);
+    if (at.getTime() > now + 60000 && at.getTime() < now + s.toReset) {
+      out.push({ id: REMINDER_IDS[0], at, title: s.risk.length ? `🔥 ${s.risk.length} streak${s.risk.length === 1 ? '' : 's'} at risk` : 'Dailies still due', body });
+    }
+  }
+  if (LAST_CALL_MINUTES > 0) {
+    const at = now + s.toReset - LAST_CALL_MINUTES * 60000;
+    if (at > now + 60000) out.push({ id: REMINDER_IDS[1], at: new Date(at), title: `Last call: day resets in ${fmtLeft(LAST_CALL_MINUTES * 60000)}`, body });
+  }
+  return out;
+}
+
+async function syncReminders(plan) {
+  try {
+    await Notification.removePending(REMINDER_IDS);
+    for (const r of plan) {
+      const n = new Notification();
+      n.identifier = r.id;
+      n.threadIdentifier = 'streakboard';
+      n.title = r.title;
+      n.body = r.body;
+      n.openURL = APP_URL;
+      n.setTriggerDate(r.at);
+      await n.schedule();
+    }
+  } catch (e) {
+    // Reminders are best-effort; the widget still renders.
+    console.log(`Reminder scheduling failed: ${e}`);
+  }
 }
 
 // ---------- credentials & data ----------
@@ -252,7 +312,10 @@ async function main() {
   let w;
   try {
     const data = await loadData();
-    w = buildWidget(data, config.widgetFamily || 'medium', (args.widgetParameter || '').trim().toLowerCase(), Date.now());
+    const now = Date.now();
+    // Only (re)plan reminders from fresh data, never from the offline cache.
+    if (!data.cached) await syncReminders(planReminders(summarize(data.user, data.dailies, now), now));
+    w = buildWidget(data, config.widgetFamily || 'medium', (args.widgetParameter || '').trim().toLowerCase(), now);
   } catch (e) {
     w = errorWidget(e.message);
   }

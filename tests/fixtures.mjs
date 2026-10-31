@@ -15,34 +15,38 @@ const add = (key, n) => new Date(Date.parse(key + 'T00:00:00Z') + n * DAY).toISO
  * "record yesterday's activity" prompt (written next day before cron), '.' due & missed, '-' not due.
  * todayState: 'done' | 'due' | 'notdue'. skipCron: day indices the app wasn't opened.
  */
-export function makeDaily(id, text, pattern, todayState, today, skipCron = new Set()) {
+export function makeDaily(id, text, pattern, todayState, today, skipCron = new Set(), restDays = new Set()) {
   const n = pattern.length;
   const start = add(today, -n);
   const history = [];
   let streak = 0;
+  let value = 0; // check-offs raise it, penalised misses lower it (as in Habitica)
   let pendingDone = false, pendingDue = false, missedSince = false;
   for (let i = 0; i <= n; i++) {
     const day = add(start, i);
     // Cron at 09:00 local closes the previous day (unless the app wasn't opened).
     if (i > 0 && !skipCron.has(i)) {
       if (pattern[i - 1] === 'y') {
-        history.push({ date: at(day, 8, 59), value: 2, isDue: true, completed: true });
+        value += 1;
+        history.push({ date: at(day, 8, 59), value, isDue: true, completed: true });
         pendingDone = true; streak++;
       }
-      if (!pendingDone) history.push({ date: at(day, 9, 0) + id.length * 7, value: 1, isDue: pendingDue, completed: false });
-      if (!pendingDone && missedSince) streak = 0;
+      const resting = restDays.has(i - 1);
+      if (!pendingDone && missedSince && !resting) value -= 1;
+      if (!pendingDone) history.push({ date: at(day, 9, 0) + id.length * 7, value, isDue: pendingDue, completed: false });
+      if (!pendingDone && missedSince && !resting) streak = 0;
       pendingDone = false; missedSince = false;
     }
     if (i === n) break;
     const c = pattern[i];
     pendingDue = c !== '-';
     if (c === 'x') {
-      pendingDone = true; streak++;
-      history.push({ date: at(day, 20, id.charCodeAt(0) % 50), value: 2, isDue: true, completed: true });
+      pendingDone = true; streak++; value += 1;
+      history.push({ date: at(day, 20, id.charCodeAt(0) % 50), value, isDue: true, completed: true });
     } else if (c === '.') missedSince = true;
   }
   const completed = todayState === 'done';
-  if (completed) { streak++; history.push({ date: at(today, 21, 0), value: 3, isDue: true, completed: true }); }
+  if (completed) { streak++; history.push({ date: at(today, 21, 0), value: value + 1, isDue: true, completed: true }); }
   return {
     id, _id: id, text, type: 'daily', notes: '', streak, completed, isDue: todayState !== 'notdue',
     frequency: 'daily', everyX: 1, repeat: { m: true, t: true, w: true, th: true, f: true, s: true, su: true },

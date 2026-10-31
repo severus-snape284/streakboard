@@ -77,3 +77,5 @@ export const scoreChecklistItem = (creds, taskId, itemId) =>
   post(`/tasks/${encodeURIComponent(taskId)}/checklist/${encodeURIComponent(itemId)}/score`, creds);
 /** Close the previous Habitica day (what Habitica's "Start my day" does). */
 export const runCron = (creds) => post('/cron', creds);
+/** Toggle resting in the Inn: no damage and no streak resets while resting. Returns the new state. */
+export const toggleSleep = (creds) => post('/user/sleep', creds);

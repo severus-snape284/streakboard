@@ -208,6 +208,22 @@ async function startNewDay() {
   doRefresh({ force: true });
 }
 
+async function toggleInn() {
+  const resting = !!state.view?.user?.preferences?.sleep;
+  const msg = resting
+    ? 'Leave the Inn? From the next day rollover, unticked due dailies will count as missed again.'
+    : "Rest in the Inn? Habitica won't reset your streaks or apply damage until you leave. Remember to leave when you're back.";
+  if (!confirm(msg)) return;
+  try {
+    await store.toggleSleep(store.getCreds());
+    toast(resting ? 'You left the Inn' : 'Resting in the Inn: streaks are safe');
+  } catch (e) {
+    toast(e.message || 'Could not change Inn status', 4000);
+  }
+  await doRefresh({ force: true });
+  render(); // also updates the Settings button, which data refreshes don't redraw
+}
+
 async function toggleBadge() {
   if (!state.badge) {
     // iOS only shows badges for installed PWAs with notification permission.
@@ -249,6 +265,7 @@ app.addEventListener('click', async (ev) => {
   else if (action === 'cron') startNewDay();
   else if (action === 'badge') toggleBadge();
   else if (action === 'copy-widget') copyWidgetScript();
+  else if (action === 'sleep') toggleInn();
   else if (action === 'focus') {
     state.prefs = await store.updatePrefs((p) => { p.focus = id ? { taskId: id, since: state.view.ctx.cronDay } : null; });
     toast(id ? 'Focus set for this week' : 'Focus cleared');

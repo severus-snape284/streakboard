@@ -302,3 +302,40 @@ export function focusProgress(task, since, today) {
 export function focusExpired(focus, today) {
   return !focus?.taskId || addDays(focus.since, 7) <= today;
 }
+
+// ---------- adjustments & tomorrow ----------
+
+/** Dailies due on the day after `today`, from Habitica's nextDue (local midnights). */
+export function dueTomorrow(tasks, today, tz) {
+  const tomorrow = addDays(today, 1);
+  return tasks.filter((t) => (t.nextDue || []).some((d) => {
+    const ts = Date.parse(d);
+    return !isNaN(ts) && dayKey(ts, tz, 0) === tomorrow;
+  }));
+}
+
+/**
+ * Struggling dailies (done < 60% of due days over the last 30, at least 5 due days)
+ * with one concrete suggestion each, based on what the data shows.
+ */
+export function adjustmentTips(tasks, today, { minis = {}, dayStart = 0 } = {}) {
+  const from = addDays(today, -30);
+  const out = [];
+  for (const t of tasks) {
+    let done = 0, due = 0;
+    for (const [k, v] of Object.entries(t.days || {})) {
+      if (k < from || k >= today) continue;
+      if (v === 'done') { done++; due++; } else if (v === 'missed') due++;
+    }
+    if (due < 5 || done / due >= 0.6) continue;
+    const weak = weakestWeekday(weekdayStats([t.days], from));
+    let tip;
+    if (weak && weak.rate === 0 && weak.due >= 2) tip = `You haven't managed it on a ${weekdayLong(weak.i)} lately. Consider taking ${weekdayLong(weak.i)}s off its schedule in Habitica: a realistic schedule beats a broken streak.`;
+    else if (t.usual != null && t.usual + dayStart * 60 >= 22 * 60) tip = 'You usually get to this late at night. Try anchoring it to something earlier in your day.';
+    else if (!minis[t.id]) tip = 'Make it smaller. Add a 2-minute version you can always do, so a hard day still counts.';
+    else if (t.frequency === 'daily' && (t.everyX || 1) === 1) tip = 'Every day may be too ambitious right now. Try a few set days a week, then build back up.';
+    else tip = 'Pair it with a habit you never skip, and set a specific when/where plan.';
+    out.push({ task: t, done, due, rate: done / due, tip });
+  }
+  return out.sort((a, b) => a.rate - b.rate);
+}

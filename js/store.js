@@ -71,6 +71,7 @@ export async function patchLocal(kind, id, fn) {
 export const scoreTask = (creds, id, dir) => api.scoreTask(creds, id, dir);
 export const scoreChecklistItem = (creds, taskId, itemId) => api.scoreChecklistItem(creds, taskId, itemId);
 export const runCron = (creds) => api.runCron(creds);
+export const toggleSleep = (creds) => api.toggleSleep(creds);
 
 export const exportBackup = () => db.exportAll();
 export const importBackup = (json) => db.importAll(json, mergeObserved, mergePrefs);

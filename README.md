@@ -25,7 +25,11 @@ Keep using the official Habitica app to check things off. Streakboard is the sco
 - **Undo** for 5 seconds after ticking a daily
 - **2-minute version** per daily, shown in the at-risk banners so a busy day doesn't break the streak
 - **Weekly review** (wins, slips with reasons) and a **focus daily** for the week, pinned at the top of Streaks
-- **Home Screen & Lock Screen widget** via the free Scriptable app (see below)
+- **Home Screen & Lock Screen widget** via the free Scriptable app (see below), with **smart reminders**
+- **Rest in the Inn** from Streakboard for sick days or travel: Habitica doesn't reset streaks while you rest.
+  Inn days are recognised in history (the daily's value doesn't drop), so they don't count as misses
+- **Needs adjustment**: dailies done less than 60% of the time get one concrete suggestion
+- **Tomorrow preview** once today is a perfect day
 - Optional **app icon badge** with the number of dailies still due (iOS 16.4+, needs notification permission)
 - Pull-to-refresh, opens offline, last-updated timestamp
 - Export / Import a JSON backup
@@ -56,6 +60,12 @@ iOS doesn't allow widgets for web apps, so `widgets/streakboard-widget.js` is a 
 3. Add a Scriptable widget (small, medium or large, or a Lock Screen size). Then **long-press it → Edit Widget →
    Script → Streakboard**. If it says "Configure widget to select the script to run", this step hasn't been done yet.
    Set the widget parameter to `risk` to list at-risk and due dailies first instead of top streaks.
+
+**Smart reminders:** every time the widget refreshes, it reschedules two local notifications, but only if dailies are
+still due: an evening reminder (21:00) and a "last call" 90 minutes before your Habitica day resets. Both name the daily
+most at risk. When everything's done, pending reminders are cleared. Change the times at the top of the script.
+Scriptable asks for notification permission the first time. A reminder can still fire if you finished your dailies
+less than one widget refresh earlier.
 
 iOS decides when widgets refresh (roughly every 15 to 30 minutes). Tapping the widget opens Streakboard in Safari,
 because iOS doesn't let widgets open a Home Screen web app directly.

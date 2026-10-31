@@ -7,14 +7,20 @@ import { scenario } from './fixtures.mjs';
 
 const SRC = fs.readFileSync(new URL('../widgets/streakboard-widget.js', import.meta.url), 'utf8');
 
-function makeEnv({ family, inWidget = true, creds = true, fail = null, param = '' }) {
+function makeEnv({ family, inWidget = true, creds = true, fail = null, param = '', now = null }) {
   const texts = [];
   const keychain = new Map(creds ? [['streakboard_habitica_user_id', 'u'], ['streakboard_habitica_api_token', 't']] : []);
   const files = new Map();
   const requests = [];
-  const today = new Date(Date.now() + 330 * 60000 - 5 * 3600000).toISOString().slice(0, 10);
+  const clock = now ?? Date.now();
+  const today = new Date(clock + 330 * 60000 - 5 * 3600000).toISOString().slice(0, 10);
   const { user, dailies } = scenario(today);
-  user.lastCron = new Date(Date.now() - 60000).toISOString();
+  user.lastCron = new Date(clock - 60000).toISOString();
+  // Optionally freeze the script's clock.
+  const FakeDate = now == null ? Date : class extends Date {
+    constructor(...a) { super(...(a.length ? a : [now])); }
+    static now() { return now; }
+  };
   class Stack {
     constructor() { this.children = []; }
     addText(s) { const t = { text: s }; texts.push(String(s)); this.children.push(t); return t; }
@@ -23,7 +29,14 @@ function makeEnv({ family, inWidget = true, creds = true, fail = null, param = '
     addSpacer() {} layoutHorizontally() {} layoutVertically() {} centerAlignContent() {} setPadding() {}
   }
   let set = null;
+  const notif = { removed: [], scheduled: [] };
   const env = {
+    Date: FakeDate,
+    Notification: class {
+      static async removePending(ids) { notif.removed.push(...ids); }
+      setTriggerDate(d) { this.at = d; }
+      async schedule() { notif.scheduled.push(this); }
+    },
     console,
     Color: Object.assign(function (hex) { this.hex = hex; }, { white: () => ({ hex: '#fff' }) }),
     Font: { systemFont: () => ({}), boldSystemFont: () => ({}), boldRoundedSystemFont: () => ({}) },
@@ -48,7 +61,7 @@ function makeEnv({ family, inWidget = true, creds = true, fail = null, param = '
     args: { widgetParameter: param },
     Script: { setWidget: (w) => { set = w; }, complete: () => {} },
   };
-  return { env, texts, files, requests, get widget() { return set; }, setFail: (f) => { fail = f; } };
+  return { env, texts, files, requests, notif, dailies, user, get widget() { return set; }, setFail: (f) => { fail = f; } };
 }
 
 async function run(e) {
@@ -99,4 +112,39 @@ test('widget never stores credentials in its cache file', async () => {
   await run(e);
   const cached = [...e.files.values()].join('');
   assert.ok(!cached.includes('"t"') && !cached.includes('api'), cached.slice(0, 100));
+});
+
+// 12:00 in UTC+5:30 on 2026-10-31: both reminders are still ahead.
+const NOON = Date.parse('2026-10-31T06:30:00Z');
+
+test('widget schedules smart reminders only while dailies are due', async () => {
+  const e = makeEnv({ family: 'small', now: NOON });
+  await run(e);
+  assert.deepEqual(e.notif.removed, ['streakboard-evening', 'streakboard-lastcall']);
+  assert.equal(e.notif.scheduled.length, 2, 'evening + last-call reminders scheduled');
+  // Last call = 90 min before the 05:00 local reset = 03:30 local = 22:00Z.
+  assert.equal(e.notif.scheduled.find((n) => n.identifier === 'streakboard-lastcall').at.toISOString(), '2026-10-31T22:00:00.000Z');
+  for (const n of e.notif.scheduled) {
+    assert.ok(n.at.getTime() > NOON, 'trigger is in the future');
+    assert.ok(n.body.includes('still due'), n.body);
+    assert.ok(n.body.includes('Floss'), `names the top at-risk daily: ${n.body}`);
+    assert.equal(n.openURL, 'https://severus-snape284.github.io/streakboard/');
+  }
+
+  const done = makeEnv({ family: 'small', now: NOON });
+  for (const t of done.dailies) t.completed = true;
+  await run(done);
+  assert.equal(done.notif.removed.length, 2, 'pending reminders cleared');
+  assert.equal(done.notif.scheduled.length, 0, 'nothing scheduled when all done');
+
+  const late = makeEnv({ family: 'small', now: Date.parse('2026-10-31T22:30:00Z') }); // 04:00 local
+  await run(late);
+  assert.equal(late.notif.scheduled.length, 0, 'no reminders once their times have passed');
+
+  const off = makeEnv({ family: 'small', now: NOON });
+  await run(off);
+  off.notif.removed.length = 0; off.notif.scheduled.length = 0;
+  off.setFail('network');
+  await run(off);
+  assert.equal(off.notif.removed.length, 0, 'offline cache never touches reminders');
 });

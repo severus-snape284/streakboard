@@ -223,3 +223,42 @@ test('weekly review: wins, slips with reasons, suggestion; focus progress', () =
   assert.equal(I.focusExpired({ taskId: 'b', since: '2026-10-25' }, today), false);
   assert.equal(I.focusExpired(null, today), true);
 });
+
+test('days resting in the Inn are neutral, not misses', () => {
+  // Missed days 3-4 while resting: Habitica keeps the streak and doesn't lower the value.
+  const t = makeDaily('x', 'Rest', 'xxx..xx', 'due', '2026-10-31', new Set(), new Set([3, 4]));
+  const other = makeDaily('y', 'Other', '-------', 'notdue', '2026-10-31');
+  assert.equal(t.streak, 5);
+  const a = s.analyzeHistory([t, other], { tzOffsetMin: TZ, dayStart: DAY_START });
+  const days = s.historyToDays(t, a);
+  assert.equal(days['2026-10-27'], 'rest');
+  assert.equal(days['2026-10-28'], 'rest');
+  const r = s.reconstructStreaks(days);
+  assert.equal(r.current, 5);
+  assert.equal(r.breaks.length, 0);
+});
+
+test('tomorrow preview and adjustment tips', () => {
+  const today = '2026-10-31';
+  const tasks = [
+    { id: 'a', text: 'A', nextDue: ['2026-10-31T18:30:00.000Z'], days: {} },
+    { id: 'b', text: 'B', nextDue: ['2026-11-02T18:30:00.000Z'], days: {} },
+  ];
+  assert.deepEqual(I.dueTomorrow(tasks, today, TZ).map((t) => t.id), ['a']);
+  const days = {};
+  for (let i = 1; i <= 28; i++) {
+    const k = s.addDays(today, -i);
+    // misses every Tuesday and every other day
+    days[k] = I.weekdayIndex(k) === 1 || i % 2 === 0 ? 'missed' : 'done';
+  }
+  const struggling = { id: 's', text: 'S', frequency: 'daily', everyX: 1, days };
+  const fine = { id: 'f', text: 'F', days: Object.fromEntries(Object.keys(days).map((k) => [k, 'done'])) };
+  const tips = I.adjustmentTips([struggling, fine], today);
+  assert.equal(tips.length, 1);
+  assert.equal(tips[0].task.id, 's');
+  assert.ok(tips[0].tip.includes('Tuesday'), tips[0].tip);
+  delete struggling.days[Object.keys(days).find((k) => I.weekdayIndex(k) === 1)];
+  for (const k of Object.keys(struggling.days)) if (I.weekdayIndex(k) === 1) struggling.days[k] = 'done';
+  assert.ok(I.adjustmentTips([struggling], today)[0].tip.includes('2-minute'), 'suggests a 2-minute version when none set');
+  assert.ok(I.adjustmentTips([struggling], today, { minis: { s: 'one page' } })[0].tip.includes('few set days'));
+});

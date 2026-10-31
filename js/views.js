@@ -4,12 +4,12 @@ import {
   missedLastTime, dayRollup, perfectStreak, periodStats, weekdayStats, weakestWeekday,
   weekdayName, weekdayLong, habitStats, nextRollover, fmtDuration,
   fmtClock, pastUsualTime, minutesIntoDay, milestoneForecast, unexplainedMisses, reasonStats, MISS_REASONS,
-  weeklyReview, focusProgress, focusExpired,
+  weeklyReview, focusProgress, focusExpired, dueTomorrow, adjustmentTips,
 } from './insights.js';
 import { describeSchedule } from './model.js';
 import { esc, relTime, fmtDay, pct, FLAME, REFRESH_ICON, CHECK_ICON, PLUS_ICON, ring } from './ui.js';
 
-export const APP_VERSION = '2.2.0';
+export const APP_VERSION = '2.3.0';
 
 const nowMin = (ctx) => minutesIntoDay(Date.now(), ctx.tz, ctx.ds);
 
@@ -38,7 +38,11 @@ function notes(state, { rescue = false } = {}) {
   let out = '';
   if (state.error) out += `<p class="note err">${esc(state.error)}</p>`;
   if (v?.user?.preferences?.sleep) {
-    out += `<p class="note">You're resting in the Inn. Habitica has paused your dailies, so streaks won't break.</p>`;
+    out += `<section class="rescue rest" aria-label="Resting in the Inn">
+      <h2>Resting in the Inn</h2>
+      <p>Habitica isn't resetting streaks or taking damage while you rest. You can still tick dailies, and they'll still count. Leave the Inn when you're back to normal.</p>
+      <button class="btn" data-action="sleep">Leave the Inn</button>
+    </section>`;
   } else if (v?.ctx?.stale) {
     const day = fmtDay(v.ctx.cronDay, { weekday: 'long' });
     const open = v.tasks.filter((t) => t.isDue && !t.completed).length;
@@ -117,10 +121,13 @@ export function homeView(state) {
   const dueTotal = tasks.filter((t) => t.isDue).length;
   const doneDue = tasks.filter((t) => t.isDue && t.completed).length;
   const perfect = perfectStreak(dayRollup(tasks, ctx.cronDay), ctx.cronDay);
-  const twice = sortTasks(tasks.filter((t) => missedLastTime(t, ctx.cronDay)), 'streak');
-  const risky = sortTasks(tasks.filter((t) => atRisk(t) && !missedLastTime(t, ctx.cronDay)), 'streak');
+  // Streaks can't break while resting in the Inn, so skip the warnings then.
+  const resting = !!v.user?.preferences?.sleep;
+  const twice = resting ? [] : sortTasks(tasks.filter((t) => missedLastTime(t, ctx.cronDay)), 'streak');
+  const risky = resting ? [] : sortTasks(tasks.filter((t) => atRisk(t) && !missedLastTime(t, ctx.cronDay)), 'streak');
   const left = ctx.stale ? null : nextRollover(ctx.today, ctx.tz, ctx.ds) - Date.now();
   const sorted = state.sort === 'time' ? sortByTime(tasks) : sortTasks(tasks, state.sort);
+  const tomorrow = ctx.stale ? [] : dueTomorrow(tasks, ctx.cronDay, ctx.tz);
   const seg = [['streak', 'Streak'], ['due', 'Due'], ['time', 'Time'], ['name', 'Name']]
     .map(([k, l]) => `<button data-sort="${k}" aria-pressed="${state.sort === k}">${l}</button>`).join('');
   const bannerItem = (t) => {
@@ -158,6 +165,7 @@ export function homeView(state) {
         <div class="ring-wrap">${ring(doneDue, dueTotal)}<span class="num">${doneDue}/${dueTotal}</span></div>
         <div>
           <b>${dueTotal && doneDue === dueTotal ? 'Perfect day!' : `${dueTotal - doneDue} still due ${esc(dayLabel(ctx))}`}</b>
+          ${dueTotal && doneDue === dueTotal && tomorrow.length ? `<span class="muted">Tomorrow: ${tomorrow.length} due (${esc(tomorrow.slice(0, 3).map((t) => t.text).join(', '))}${tomorrow.length > 3 ? '…' : ''})</span><br>` : ''}
           <span class="muted">${left != null ? `<span data-countdown>${fmtDuration(left)}</span> until your day resets` : 'New Habitica day is waiting'}</span>
         </div>
       </div>
@@ -188,7 +196,7 @@ function heatmap(t, ctx) {
     for (let d = 0; d < 7; d++) {
       const k = addDays(wk, d);
       const st = k > today ? 'future' : t.days[k] || '';
-      const title = k > today ? '' : `${fmtDay(k)}: ${({ done: 'done', missed: 'missed', notdue: 'not due', due: 'due, not done yet' })[st] || 'no data'}`;
+      const title = k > today ? '' : `${fmtDay(k)}: ${({ done: 'done', missed: 'missed', notdue: 'not due', due: 'due, not done yet', rest: 'resting (streak kept)' })[st] || 'no data'}`;
       html += `<i class="${st}${k === today ? ' today' : ''}" title="${esc(title)}"></i>`;
     }
   }
@@ -197,6 +205,7 @@ function heatmap(t, ctx) {
       <span><i style="background:var(--cell-done)"></i>Done</span>
       <span><i style="background:var(--cell-missed)"></i>Missed</span>
       <span><i style="background:var(--cell-notdue)"></i>Not due</span>
+      <span><i style="background:var(--cell-rest)"></i>Rest</span>
       <span><i style="background:var(--cell-empty)"></i>No data</span>
     </div>`;
 }
@@ -312,6 +321,18 @@ function reasonsCard(state, from, n) {
   </div>`;
 }
 
+function adjustCard(state) {
+  const v = state.view;
+  const tips = adjustmentTips(v.tasks, v.ctx.cronDay, { minis: state.prefs.minis || {}, dayStart: v.ctx.ds });
+  if (!tips.length) return '';
+  return `<section class="card"><h2>Needs adjustment</h2>
+    <p>These dailies were done less than 60% of the time they were due over the last 30 days. A small change usually works better than more willpower.</p>
+    <ul class="rates">${tips.map((x) => `<li><a href="${link(x.task.id)}">
+      <div class="spread"><span class="rate-title">${esc(x.task.text)}</span><b class="num">${pct(x.rate)}</b></div>
+      <div class="small muted" style="margin-top:4px">${esc(x.tip)}</div></a></li>`).join('')}</ul>
+  </section>`;
+}
+
 function reviewCard(state) {
   const v = state.view;
   const r = weeklyReview(v.tasks, state.prefs.reasons, v.ctx.cronDay);
@@ -348,6 +369,7 @@ export function insightsView(state) {
   const arrow = (d) => (d == null ? '' : d > 0 ? `<span class="up">▲ ${d}</span>` : d < 0 ? `<span class="down">▼ ${-d}</span>` : '<span class="muted">±0</span>');
   return `${topbar(state, 'Insights')}
     ${reviewCard(state)}
+    ${adjustCard(state)}
     <div class="seg" role="group" aria-label="Period">${seg}</div>
     <section class="hero">
       <div class="hero-main">
@@ -434,6 +456,11 @@ export function settingsView(state, setup, creds) {
       </ol>
       <button class="btn" data-action="copy-widget">Copy widget script</button>
       <a class="btn" href="widgets/streakboard-widget.js" target="_blank" rel="noopener">View script</a>
+    </div>
+    <div class="card">
+      <h2>Taking a break?</h2>
+      <p>Sick, travelling or need a real rest day? Resting in Habitica's Inn pauses penalties: streaks don't reset and you take no damage while you rest. (Party quest bosses can still hurt your party if others miss dailies.)</p>
+      <button class="btn" data-action="sleep">${state.view?.user?.preferences?.sleep ? 'Leave the Inn' : 'Rest in the Inn'}</button>
     </div>
     <div class="card">
       <h2>App icon badge</h2>

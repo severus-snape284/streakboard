@@ -71,6 +71,7 @@ await ctx.route('https://habitica.com/api/v3/**', async (route) => {
       return ok({});
     }
     if (u.pathname.endsWith('/cron')) { user.lastCron = new Date().toISOString(); return ok({}); }
+    if (u.pathname.endsWith('/user/sleep')) { user.preferences.sleep = !user.preferences.sleep; return ok(user.preferences.sleep); }
     return route.fulfill({ status: 404, headers: cors, json: { success: false, message: 'nope' } });
   }
   if (u.pathname === '/api/v3/user') return ok(user);
@@ -255,6 +256,23 @@ check((await page.textContent('body')).includes('Scriptable'), 'settings: widget
 const widgetSrc = await page.evaluate(() => fetch('widgets/streakboard-widget.js').then((r) => r.text()));
 check(widgetSrc.includes('ListWidget'), 'widget script is served with the app');
 await shot('04-settings');
+
+// 6b. Rest in the Inn and back
+page.once('dialog', (d) => d.accept());
+await page.click('[data-action=sleep]');
+await page.waitForFunction(() => document.querySelector('[data-action=sleep]')?.textContent.includes('Leave the Inn'));
+check(posts.some((p) => p.endsWith('/user/sleep')), 'Rest in the Inn sends POST /user/sleep');
+await page.click('#nav a[data-nav=home]');
+await page.waitForSelector('.rescue.rest');
+check((await page.textContent('.rescue.rest')).includes('Resting in the Inn'), 'home shows resting banner');
+check(await page.locator('.risk').count() === 0, 'no streak warnings while resting');
+await shot('04b-inn');
+page.once('dialog', (d) => d.accept());
+await page.click('.rescue.rest [data-action=sleep]');
+await page.waitForFunction(() => !document.querySelector('.rescue.rest'));
+check(true, 'leaving the Inn removes the banner');
+await page.click('#nav a[data-nav=settings]');
+await page.waitForSelector('[data-action=export]');
 
 // 7. Export produces a backup file
 const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-action=export]')]);
