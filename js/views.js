@@ -11,7 +11,7 @@ import { weeklyColumns, streakLine, sparkColumns } from './charts.js';
 import { describeSchedule } from './model.js';
 import { esc, relTime, fmtDay, pct, FLAME, REFRESH_ICON, CHECK_ICON, PLUS_ICON, ring } from './ui.js';
 
-export const APP_VERSION = '3.1.0';
+export const APP_VERSION = '3.2.0';
 
 const nowMin = (ctx) => minutesIntoDay(Date.now(), ctx.tz, ctx.ds);
 
@@ -544,6 +544,17 @@ export function settingsView(state, setup, creds) {
           <li>Try: "Which daily am I worst at?", "Why do my streaks break?", "What should I do tonight?"</li>
         </ol>
         <p class="small">On-Device and Private Cloud Compute keep your data with Apple's private AI. Avoid the ChatGPT option unless you're fine with sending your habit data to OpenAI.</p></details>
+      <details id="ai-notify"><summary><b>4. Smart notifications</b>: written by AI, based on your progress</summary>
+        <p class="small" style="margin-top:8px">At times you choose, Apple Intelligence writes a notification that fits where you are right now: gentle at midday, specific in the evening, urgent near the end of the day, and one celebration on a perfect day. It stays silent when everything's done, nothing's due, or you're resting in the Inn.</p>
+        <ol class="steps">
+          <li>New shortcut, named <b>Streakboard nudge</b>: add <b>Run Script</b> → Streakboard, Parameter: <code>notify</code>.</li>
+          <li>Add <b>If</b>: <i>Script Result</i> <b>is</b> <code>NONE</code>. Leave the top branch empty.</li>
+          <li>In the <b>Otherwise</b> branch, add <b>Use Model</b> (Private Cloud Compute or On-Device). Request: <b>Script Result</b>. Turn off <i>Follow Up</i>.</li>
+          <li>Still in <b>Otherwise</b>, add <b>Show Notification</b>. Title: <code>Streakboard</code>. Body: the model's <b>Response</b>.</li>
+          <li>Open the <b>Automation</b> tab → <b>+</b> → <b>Time of Day</b> → e.g. <b>1:00 PM</b>, Daily → <b>Run Immediately</b>, turn off <i>Notify When Run</i> → choose <b>Streakboard nudge</b>.</li>
+          <li>Repeat for more times, e.g. <b>8:00 PM</b> and <b>11:30 PM</b> (you usually tick around 11 PM to midnight).</li>
+        </ol>
+        <p class="small">While these automations run, the script's fixed 9 PM / last-call reminders switch off by themselves, so you won't get both. Tapping the notification opens Shortcuts, not Streakboard (an iOS limitation).</p></details>
     </div>
     <div class="card">
       <h2>Taking a break?</h2>

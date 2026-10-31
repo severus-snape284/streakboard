@@ -90,6 +90,7 @@ then **Show Result** so Siri reads the reply aloud:
 | `tomorrow` | What's due tomorrow (from Habitica's own schedule) |
 | `tick <name>` | Checks off a daily (or +1 a positive habit) matching part of its name, and confirms the new streak |
 | `ask <question>` | Returns a prompt with your compact streak data. Pipe it into **Use Model** (Apple Intelligence, Private Cloud Compute or On-Device) and show the response |
+| `notify` | For a **time-of-day automation**: returns `NONE` (don't notify: all done, nothing due, resting, or already celebrated today) or a prompt for **Use Model** to draft a notification. Tone escalates with the time left and the clock; the angle rotates (streak pride, time left, smallest next step, momentum, milestone). While this runs, the fixed template reminders switch themselves off |
 
 Full step-by-step setup is in the app under **Settings → Siri & Apple Intelligence**. The replies are built from the
 same history logic as the app (tested in `tests/widget.test.mjs`); only `ask` answers come from an AI model, which can

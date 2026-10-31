@@ -15,6 +15,8 @@
 //   week                  the last 7 days: rate, perfect days, strongest and weakest daily
 //   tick <name>           check off a daily, or +1 a positive habit, by (part of) its name
 //   ask <question>        returns a prompt with your data for the "Use Model" action
+//   notify                for a time-based automation: returns NONE (don't notify) or a prompt
+//                         for "Use Model" to draft a notification that fits your progress right now
 // The reply is the shortcut's output; end the Shortcut with "Show Result" so Siri reads it aloud.
 //
 // Smart reminders: whenever the widget refreshes (or you run the script), it schedules local
@@ -670,6 +672,99 @@ function factsText(data, now, habits = []) {
   return lines.join('\n');
 }
 
+// ---------- AI-drafted notifications ----------
+
+const AI_NOTIFY_FILE = 'streakboard-ai-notify.json';
+
+function aiNotifyState() {
+  try {
+    const [fm] = cachePath();
+    const p = fm.joinPath(fm.documentsDirectory(), AI_NOTIFY_FILE);
+    return fm.fileExists(p) ? JSON.parse(fm.readString(p)) : {};
+  } catch { return {}; }
+}
+
+function saveAiNotifyState(st) {
+  try {
+    const [fm] = cachePath();
+    fm.writeString(fm.joinPath(fm.documentsDirectory(), AI_NOTIFY_FILE), JSON.stringify(st));
+  } catch { /* best-effort */ }
+}
+
+/** While the AI automation runs (seen in the last 36h), the fixed template reminders stand down. */
+function aiNotifyActive(now) {
+  const st = aiNotifyState();
+  return !!st.lastRun && now - st.lastRun < 36 * 3600000;
+}
+
+function clock(ts, tz) {
+  const d = new Date(ts - tz * 60000);
+  const h = d.getUTCHours(), m = d.getUTCMinutes();
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+/**
+ * Decide whether to notify and, if so, build the prompt for "Use Model".
+ * Returns 'NONE' or a prompt. Tone escalates with the time left; the angle rotates.
+ */
+function notifyReply(data, now) {
+  const v = voiceCtx(data, now);
+  const { s } = v;
+  const st = aiNotifyState();
+  st.lastRun = now;
+  if (v.resting || !s.dueTotal) { saveAiNotifyState(st); return 'NONE'; }
+
+  const hour = new Date(now - v.tz * 60000).getUTCHours();
+  const facts = [`- Local time: ${clock(now, v.tz)}.`];
+  let tone, angles;
+  if (s.stale) {
+    facts.push(`- Habitica hasn't started the user's new day yet: ticking anything they did on ${weekdayOf(v.today)} still counts for that day.`);
+    facts.push(`- ${s.open} of ${s.dueTotal} dailies from ${weekdayOf(v.today)} are still unticked.`);
+    tone = 'friendly and practical: remind them to open Habitica and record what they did';
+    angles = ['smallest next step'];
+  } else if (!s.open) {
+    if (st.celebrated === v.today) { saveAiNotifyState(st); return 'NONE'; }
+    st.celebrated = v.today;
+    facts.push(`- All ${s.dueTotal} due dailies are done today. A perfect day.`);
+    if (s.top) facts.push(`- Best current streak: ${plain(s.top.text)} at ${s.top.streak} days.`);
+    tone = 'warm and celebratory, very brief; do not ask them to do anything else';
+    angles = ['celebration'];
+  } else {
+    const open = s.byRisk.filter((t) => t.isDue && !t.completed);
+    const hoursLeft = s.left / 3600000;
+    facts.push(`- ${s.doneDue} of ${s.dueTotal} due dailies done; ${spokenLeft(s.left)} until the day resets at ${v.ds}:00 AM.`);
+    for (const t of open.slice(0, 4)) {
+      const i = data.dailies.indexOf(t);
+      const twice = lastDueOutcome(v.days[i], v.today) === 'missed';
+      facts.push(`- Still due: ${plain(t.text)}${t.streak ? ` (${t.streak}-day streak${t.streak >= 3 ? ', at risk' : ''})` : ' (no streak yet)'}${twice ? ', missed last time it was due' : ''}${MILESTONES.includes(t.streak + 1) ? `, one tick from a ${t.streak + 1}-day milestone` : ''}.`);
+    }
+    if (open.length > 4) facts.push(`- Plus ${open.length - 4} more still due.`);
+    const w = weekStats(data, v, addDays(v.today, -7), addDays(v.today, -1));
+    const pw = weekStats(data, v, addDays(v.today, -14), addDays(v.today, -8));
+    if (w.due && pw.due) facts.push(`- Last 7 days: ${Math.round((100 * w.done) / w.due)}% done when due (previous 7 days: ${Math.round((100 * pw.done) / pw.due)}%).`);
+    const late = hoursLeft < 2.5 || hour >= 23 || hour < v.ds;
+    tone = late
+      ? 'urgent but kind: the day is almost over; focus on the single most important daily and suggest doing even a tiny version of it'
+      : hoursLeft < 7 || hour >= 18
+        ? 'encouraging and specific: name what is left and make it feel doable'
+        : 'light and gentle: a friendly heads-up, no pressure';
+    angles = ['streak pride', 'time left', 'smallest next step', 'momentum this week'];
+    if (open.some((t) => MILESTONES.includes(t.streak + 1))) angles.push('milestone');
+    if (late) angles = ['smallest next step', 'streak pride'];
+  }
+  // Rotate the angle by day and hour so consecutive nudges don't sound the same.
+  const dayNum = Math.floor(Date.parse(v.today + 'T00:00:00Z') / 86400000);
+  const angle = angles[(dayNum + hour) % angles.length];
+  saveAiNotifyState(st);
+  return `Write one iPhone notification for the user of Streakboard, a Habitica streak tracker, based on their progress below.
+Rules: output only the notification text, one or two short sentences, at most 110 characters. No quotes, no hashtags, at most one emoji. Use the specific daily names and numbers from the data. Never guilt-trip and never invent facts.
+Tone: ${tone}.
+Angle: ${angle}.
+
+PROGRESS
+${facts.join('\n')}`;
+}
+
 function askPrompt(question, facts) {
   return `You are the habit coach inside Streakboard, a streak tracker for the user's Habitica dailies. Answer the user's question using only the data below. Your answer will be read aloud by Siri, so reply in 2 to 4 short, plain sentences with no lists, markdown or emoji. Be specific (use daily names and numbers), honest and encouraging, and end with one practical suggestion when it fits. If the data can't answer the question, say so briefly.
 
@@ -742,8 +837,10 @@ async function voiceReply(param) {
     return `I couldn't load your streaks: ${e.message}.`;
   }
   const now = Date.now();
-  if (!data.cached) await syncReminders(planReminders(summarize(data.user, data.dailies, now), now));
+  if (lower === 'notify') saveAiNotifyState({ ...aiNotifyState(), lastRun: now }); // stand the templates down first
+  if (!data.cached) await syncReminders(aiNotifyActive(now) ? [] : planReminders(summarize(data.user, data.dailies, now), now));
   if (!lower || lower === 'briefing' || lower === 'status' || lower === 'today') return briefingText(data, now);
+  if (lower === 'notify') return notifyReply(data, now);
   if (lower === 'tomorrow') return tomorrowText(data, now);
   if (lower === 'week' || lower === 'weekly' || lower === 'review') return weekText(data, now);
   const m = /^(tick|done|did|log|check)\s+(.*)$/i.exec(p);
@@ -771,7 +868,7 @@ async function main() {
     const data = await loadData();
     const now = Date.now();
     // Only (re)plan reminders from fresh data, never from the offline cache.
-    if (!data.cached) await syncReminders(planReminders(summarize(data.user, data.dailies, now), now));
+    if (!data.cached) await syncReminders(aiNotifyActive(now) ? [] : planReminders(summarize(data.user, data.dailies, now), now));
     w = buildWidget(data, config.widgetFamily || 'medium', (args.widgetParameter || '').trim(), now);
   } catch (e) {
     w = errorWidget(e.message);

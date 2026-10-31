@@ -6,7 +6,7 @@ built yet. Read all of it before starting.
 
 ## Status
 
-- **Phase 0 done, v1 through v3.1 built and live (2026-10-31):** https://severus-snape284.github.io/streakboard/
+- **Phase 0 done, v1 through v3.2 built and live (2026-10-31):** https://severus-snape284.github.io/streakboard/
 - v2 + consistency extras shipped (owner asked for "all additions that help me be consistent"): tick
   dailies/checklists with optimistic UI, streak rescue + `POST /cron`, countdown/progress ring,
   don't-miss-twice, perfect days, Insights tab, Habits tab, milestone celebrations, app badge.
@@ -40,6 +40,11 @@ built yet. Read all of it before starting.
   positive habits; POST score/up), `ask <question>` (returns a compact grounded prompt for the Shortcuts
   "Use Model" action). Setup steps live in Settings → Siri & Apple Intelligence (Shortcuts can't be imported
   unsigned, so the owner builds them by hand). Claude-API coach was offered but not chosen (paid service).
+- v3.2 (owner: "smart notifications drafted by AI, adjusting to progress"): script mode `notify` for Shortcuts
+  Time-of-Day automations → returns `NONE` or a prompt for "Use Model" → Show Notification. Tone: gentle
+  (>7h left and before 6 PM), specific (evening), urgent (≥11 PM, before day start, or <2.5h left); one
+  celebration per perfect day (state in `streakboard-ai-notify.json` in Scriptable's documents). Template
+  reminders stand down while the automation has run in the last 36h.
 - Verified in Habitica source (`website/server/libs/cron.js`, `common/script/ops/scoreTask.js`):
   GET requests do NOT run cron (only `POST /cron`); score up = streak+1 + history push;
   score down = streak−1 + removes last history entry.

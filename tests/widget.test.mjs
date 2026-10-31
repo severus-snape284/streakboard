@@ -277,3 +277,64 @@ test('voice mode without credentials explains how to sign in', async () => {
   await run(e);
   assert.ok(e.out.shortcut.includes('run the Streakboard script once'), e.out.shortcut);
 });
+
+// ---------- AI-drafted notifications ----------
+
+test('notify: prompt adapts tone to time left and names real dailies', async () => {
+  const noon = makeEnv({ shortcut: 'notify', now: NOON });
+  await run(noon);
+  const p = noon.out.shortcut;
+  assert.ok(p.startsWith('Write one iPhone notification'), p.slice(0, 60));
+  assert.ok(p.includes('at most 110 characters'));
+  assert.ok(p.includes('Tone: light and gentle'), p);
+  assert.ok(p.includes('Still due: Floss (6-day streak, at risk), one tick from a 7-day milestone.'), p);
+  assert.ok(p.includes('missed last time it was due'), p);
+  assert.ok(/Angle: (streak pride|time left|smallest next step|momentum this week|milestone)\./.test(p), p);
+
+  // 21:30 local (16:00Z): under 7h left → encouraging and specific.
+  const eve = makeEnv({ shortcut: 'notify', now: Date.parse('2026-10-31T16:00:00Z') });
+  await run(eve);
+  assert.ok(eve.out.shortcut.includes('Tone: encouraging and specific'), eve.out.shortcut);
+
+  // 03:30 local (22:00Z), before the 5 AM reset → urgent but kind, smallest step.
+  const late = makeEnv({ shortcut: 'notify', now: Date.parse('2026-10-31T22:00:00Z') });
+  await run(late);
+  assert.ok(late.out.shortcut.includes('Tone: urgent but kind'), late.out.shortcut);
+  assert.ok(/Angle: (smallest next step|streak pride)\./.test(late.out.shortcut));
+});
+
+test('notify: celebrates a perfect day once, stays silent when resting or nothing due', async () => {
+  const e = makeEnv({ shortcut: 'notify', now: NOON });
+  for (const t of e.dailies) if (t.isDue) t.completed = true;
+  await run(e);
+  assert.ok(e.out.shortcut.includes('Tone: warm and celebratory'), e.out.shortcut);
+  await run(e); // same day again, same files
+  assert.equal(e.out.shortcut, 'NONE', 'only one celebration per day');
+
+  const rest = makeEnv({ shortcut: 'notify', now: NOON });
+  rest.user.preferences.sleep = true;
+  await run(rest);
+  assert.equal(rest.out.shortcut, 'NONE');
+
+  const none = makeEnv({ shortcut: 'notify', now: NOON });
+  for (const t of none.dailies) t.isDue = false;
+  await run(none);
+  assert.equal(none.out.shortcut, 'NONE');
+});
+
+test('notify: while the AI automation runs, template reminders stand down', async () => {
+  const e = makeEnv({ shortcut: 'notify', now: NOON });
+  await run(e);
+  assert.equal(e.notif.scheduled.length, 0, 'no template reminders scheduled by the automation run');
+  // Later the widget refreshes (same device files): templates stay off.
+  e.env.args.shortcutParameter = undefined;
+  e.env.config.runsInWidget = true;
+  e.notif.scheduled.length = 0; e.notif.removed.length = 0;
+  await run(e);
+  assert.equal(e.notif.scheduled.length, 0);
+  assert.equal(e.notif.removed.length, 2, 'pending templates are cleared');
+  // Without the automation, templates still work (regression guard).
+  const plainEnv = makeEnv({ family: 'small', now: NOON });
+  await run(plainEnv);
+  assert.equal(plainEnv.notif.scheduled.length, 2);
+});
