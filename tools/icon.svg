@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="62%" r="70%">
+      <stop offset="0" stop-color="#3a1d10"/>
+      <stop offset="0.45" stop-color="#16141c"/>
+      <stop offset="1" stop-color="#0b0b10"/>
+    </radialGradient>
+    <linearGradient id="flame" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd76a"/>
+      <stop offset="0.45" stop-color="#ff8a3d"/>
+      <stop offset="1" stop-color="#ff4b2b"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff6d6"/>
+      <stop offset="1" stop-color="#ffd27a"/>
+    </linearGradient>
+    <linearGradient id="arc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffc24a"/>
+      <stop offset="1" stop-color="#ff6a2b"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="28"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <g id="mark">
+    <!-- progress ring: the app's "today" ring, nearly closed -->
+    <circle cx="512" cy="540" r="330" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="44"/>
+    <circle cx="512" cy="540" r="330" fill="none" stroke="url(#arc)" stroke-width="44" stroke-linecap="round"
+            stroke-dasharray="1658 2073" transform="rotate(-90 512 540)"/>
+    <!-- flame with glow -->
+    <g transform="translate(512 548) scale(0.84) translate(-512 -501)">
+    <path d="M512 230 C 548 330, 668 392, 668 560 C 668 680, 598 772, 512 772 C 426 772, 356 680, 356 560 C 356 488, 388 438, 430 398 C 434 456, 452 490, 482 506 C 468 418, 478 318, 512 230 Z"
+          fill="#ff7a32" opacity="0.55" filter="url(#glow)"/>
+    <path d="M512 230 C 548 330, 668 392, 668 560 C 668 680, 598 772, 512 772 C 426 772, 356 680, 356 560 C 356 488, 388 438, 430 398 C 434 456, 452 490, 482 506 C 468 418, 478 318, 512 230 Z"
+          fill="url(#flame)"/>
+    <path d="M512 498 C 532 556, 590 590, 590 660 C 590 714, 554 748, 512 748 C 470 748, 434 714, 434 660 C 434 622, 456 596, 478 578 C 482 610, 494 628, 506 634 C 500 586, 500 540, 512 498 Z"
+          fill="url(#core)"/>
+    </g>
+  </g>
+</svg>

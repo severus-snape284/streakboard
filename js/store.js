@@ -4,8 +4,12 @@ import * as api from './api.js';
 import { slimTask, slimHabit, ingest, buildView, mergeObserved, mergePrefs, timeCtx } from './model.js';
 
 const CREDS_KEY = 'sb.creds';
-export const AUTO_REFRESH_MS = 5 * 60 * 1000;
-export const MIN_MANUAL_GAP_MS = 15 * 1000;
+// Keep in step with Habitica: refresh when the app comes back to the foreground
+// (if the data is older than RESUME_REFRESH_MS) and every AUTO_REFRESH_MS while open.
+// 3 requests per refresh stays far below Habitica's ~30 requests/minute limit.
+export const AUTO_REFRESH_MS = 2 * 60 * 1000;
+export const RESUME_REFRESH_MS = 20 * 1000;
+export const MIN_MANUAL_GAP_MS = 10 * 1000;
 
 export function getCreds() {
   try {

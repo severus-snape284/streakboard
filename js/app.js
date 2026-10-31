@@ -442,14 +442,17 @@ async function boot() {
   store.requestPersistence().then((p) => { state.persisted = p; }).catch(() => {});
   if (store.getCreds()) doRefresh({ force: true, quiet: !!state.view });
 
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && (!state.view || Date.now() - state.view.fetchedAt > store.AUTO_REFRESH_MS)) {
-      doRefresh({ quiet: true });
-    }
-  });
+  // iOS fires different events when a Home Screen app resumes; handle them all.
+  const onResume = () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!state.view || Date.now() - state.view.fetchedAt > store.RESUME_REFRESH_MS) doRefresh({ force: true, quiet: true });
+  };
+  document.addEventListener('visibilitychange', onResume);
+  window.addEventListener('pageshow', onResume);
+  window.addEventListener('focus', onResume);
   setInterval(() => {
     if (document.visibilityState !== 'visible') return;
-    if (state.view && Date.now() - state.view.fetchedAt > store.AUTO_REFRESH_MS) doRefresh({ quiet: true });
+    if (state.view && Date.now() - state.view.fetchedAt > store.AUTO_REFRESH_MS) doRefresh({ force: true, quiet: true });
     else tick();
   }, 30000);
 

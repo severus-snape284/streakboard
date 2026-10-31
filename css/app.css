@@ -392,3 +392,13 @@ a.btn { color: var(--text); }
 /* v2.3 */
 .heat i.rest { background: var(--cell-rest); }
 .rescue.rest { background: color-mix(in srgb, var(--cell-rest) 30%, var(--surface)); border-color: color-mix(in srgb, var(--cell-rest) 70%, transparent); }
+
+/* v2.4: habit goal met */
+.check.plus.met { background: var(--done); border-color: var(--done); color: #06210f; position: relative; }
+.check.plus.met .count {
+  position: absolute; right: -4px; bottom: -4px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--line); font-size: 11px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+}
+.welcome-logo { display: flex; justify-content: center; margin: 24px 0 8px; }
+.welcome-logo img { border-radius: 22px; box-shadow: 0 10px 40px rgba(255,120,40,.25); }

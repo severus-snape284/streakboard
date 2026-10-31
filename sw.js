@@ -1,6 +1,6 @@
 // Service worker: caches the app shell so the app opens instantly and offline.
 // Bump VERSION on every release so clients pick up the new shell.
-const VERSION = 'v2.3.1';
+const VERSION = 'v2.4.0';
 const CACHE = `streakboard-${VERSION}`;
 const SHELL = [
   './',
@@ -19,6 +19,7 @@ const SHELL = [
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
+  './icons/favicon-32.png',
 ];
 
 self.addEventListener('install', (e) => {

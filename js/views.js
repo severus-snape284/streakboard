@@ -9,7 +9,7 @@ import {
 import { describeSchedule } from './model.js';
 import { esc, relTime, fmtDay, pct, FLAME, REFRESH_ICON, CHECK_ICON, PLUS_ICON, ring } from './ui.js';
 
-export const APP_VERSION = '2.3.0';
+export const APP_VERSION = '2.4.0';
 
 const nowMin = (ctx) => minutesIntoDay(Date.now(), ctx.tz, ctx.ds);
 
@@ -407,9 +407,10 @@ export function habitsView(state) {
     .sort((a, b) => b.s.streak - a.s.streak || a.h.text.localeCompare(b.h.text));
   const periodWord = { day: 'today', week: 'this week', month: 'this month' };
   return `${topbar(state, 'Habits')}
-    <p class="muted small">A habit's streak counts the days, weeks or months in a row (its Habitica reset period) where you hit its goal. Tap a goal to change it.</p>
+    <p class="muted small">Tap + each time you do a habit. It turns green ✓ once you've hit its goal for the day/week/month; you can keep tapping to add more. The streak counts periods in a row where you hit the goal. Tap "Goal" to change it.</p>
     <ul class="list">${rows.map(({ h, s }) => `<li class="row${s.streak ? '' : ' zero'}${s.thisPeriod ? ' done' : ''}">
-      <button class="check plus${state.pending.has(h.id) ? ' pending' : ''}" data-action="habit" data-id="${esc(h.id)}" aria-label="Plus one: ${esc(h.text)}">${PLUS_ICON}</button>
+      <button class="check plus${s.thisPeriod >= s.target ? ' met' : ''}${state.pending.has(h.id) ? ' pending' : ''}" data-action="habit" data-id="${esc(h.id)}"
+        aria-label="${s.thisPeriod >= s.target ? `Goal met (${s.thisPeriod}). Add another` : 'Plus one'}: ${esc(h.text)}">${s.thisPeriod >= s.target ? `${CHECK_ICON}<span class="count">${s.thisPeriod}</span>` : PLUS_ICON}</button>
       <div class="row-link">
         <div class="row-body">
           <div class="row-title">${esc(h.text)}</div>
@@ -428,7 +429,7 @@ export function habitsView(state) {
 
 export function settingsView(state, setup, creds) {
   const badgeSupported = 'setAppBadge' in navigator;
-  return `${setup ? `<header class="topbar"><h1>Welcome to Streakboard</h1></header>
+  return `${setup ? `<div class="welcome-logo"><img src="icons/icon-192.png" alt="" width="96" height="96"></div><header class="topbar"><h1>Welcome to Streakboard</h1></header>
       <p class="muted">Your Habitica streaks, streak-first. Enter your Habitica API credentials to start. They're stored only on this device and sent only to habitica.com.</p>`
     : '<header class="topbar"><h1>Settings</h1></header>'}
     <form class="card" id="creds-form" autocomplete="off">

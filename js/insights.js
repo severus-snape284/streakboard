@@ -157,6 +157,9 @@ export function habitStats(habit, tz, dayStart, today, target = 1) {
     ups[p] = (ups[p] || 0) + n;
   }
   const cur = periodKey(today, freq);
+  // Habitica's own counter for the current period (resets at cron per the habit's frequency) wins.
+  if (typeof habit.counterUp === 'number') ups[cur] = habit.counterUp;
+  if (!ups[cur]) delete ups[cur];
   const thisPeriod = ups[cur] || 0;
   const hit = (k) => (ups[k] || 0) >= target;
   // The current period counts once the target is met; until then the streak runs through the previous one.

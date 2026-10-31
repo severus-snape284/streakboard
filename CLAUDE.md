@@ -6,7 +6,7 @@ built yet. Read all of it before starting.
 
 ## Status
 
-- **Phase 0 done, v1 through v2.3 built and live (2026-10-31):** https://severus-snape284.github.io/streakboard/
+- **Phase 0 done, v1 through v2.4 built and live (2026-10-31):** https://severus-snape284.github.io/streakboard/
 - v2 + consistency extras shipped (owner asked for "all additions that help me be consistent"): tick
   dailies/checklists with optimistic UI, streak rescue + `POST /cron`, countdown/progress ring,
   don't-miss-twice, perfect days, Insights tab, Habits tab, milestone celebrations, app badge.
@@ -25,13 +25,17 @@ built yet. Read all of it before starting.
   while dailies are due); Rest in the Inn toggle (`POST /user/sleep`; verified in cron.js that sleep skips
   streak resets and damage but still writes history). Inn days are detected as due+unticked cron entries
   whose value didn't drop → status 'rest' (neutral). "Needs adjustment" tips; tomorrow preview.
+- v2.4 (owner wants "complete sync with Habitica"): refresh on every resume (visibilitychange/pageshow/focus)
+  if data > 20s old, and every 2 min while visible. Habit "this period" uses Habitica's `counterUp`.
+  Habit + button turns green ✓ with count once the goal is met (still tappable). New logo: `tools/icon.svg`
+  rendered by `tools/render_icons.mjs` (flame inside a progress ring); `tools/make_icons.py` removed.
 - Verified in Habitica source (`website/server/libs/cron.js`, `common/script/ops/scoreTask.js`):
   GET requests do NOT run cron (only `POST /cron`); score up = streak+1 + history push;
   score down = streak−1 + removes last history entry.
 - Layout: `index.html`, `sw.js`, `manifest.webmanifest`, `css/app.css`, `js/` (`streaks.js`,
   `model.js`, `insights.js` = pure logic; `api.js`, `db.js`, `store.js` = IO; `views.js`, `ui.js`,
   `app.js` = UI), `icons/`
-  (from `tools/make_icons.py`), `tests/` (`npm test` unit, `npm run e2e` Playwright w/ mocked API).
+  (from `tools/icon.svg` via `tools/render_icons.mjs`), `tests/` (`npm test` unit, `npm run e2e` Playwright w/ mocked API).
 - Bump `VERSION` in `sw.js` on each release.
 - Owner decisions already made (do not re-ask):
   - Repo is **public**; host on **GitHub Pages**, deployed by a GitHub Actions workflow.

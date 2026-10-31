@@ -216,6 +216,8 @@ check((await water.locator('.row-streak').textContent()).includes('4'), 'habit d
 await water.locator('.check.plus').click();
 await page.waitForFunction(() => [...document.querySelectorAll('.list .row')].some((r) => r.textContent.includes('Drink water') && r.textContent.includes('1× today')));
 check((await water.locator('.row-streak').textContent()).includes('5'), '+1 extends habit streak to 5');
+check(await water.locator('.check.plus.met').count() === 1, 'habit button turns green once the daily goal is met');
+check(await page.locator('.list .row', { hasText: 'Gym' }).locator('.check.plus.met').count() === 1, 'weekly habit already done this week shows as met');
 check(await noHScroll(), 'habits: no horizontal scroll');
 page.once('dialog', (d) => d.accept('3'));
 await page.locator('.list .row', { hasText: 'Gym' }).locator('[data-action=target]').click();
