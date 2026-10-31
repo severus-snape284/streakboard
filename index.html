@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://habitica.com; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; manifest-src 'self'; worker-src 'self'">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0e0e12" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f5f4f0" media="(prefers-color-scheme: light)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Streakboard">
+  <meta name="description" content="Your Habitica streaks, streak-first.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/app.css">
+  <title>Streakboard</title>
+</head>
+<body>
+  <div id="ptr" aria-hidden="true"><div class="ptr-dot"></div></div>
+  <main id="app" aria-live="polite"></main>
+  <nav id="nav" aria-label="Main">
+    <a href="#/" data-nav="home">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5c.9 3.3-1.4 5.2-2.8 7.1C7.9 11.4 7.4 12.9 7.4 14.3c0 3.3 2.3 6.2 4.6 6.2s4.6-2.9 4.6-6.2c0-1.9-.9-3.3-1.8-4.3.2 1.4-.3 2.6-1.2 3.1.3-3.1-.6-6.8-1.6-10.6z"/></svg>
+      <span>Streaks</span>
+    </a>
+    <a href="#/settings" data-nav="settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zm8.4 4.6.1-1.1-.1-1.1 2-1.6-2-3.4-2.4.9a8 8 0 0 0-1.9-1.1L15.7 3h-3.9l-.4 2.6a8 8 0 0 0-1.9 1.1l-2.4-.9-2 3.4 2 1.6-.1 1.1.1 1.1-2 1.6 2 3.4 2.4-.9c.6.5 1.2.8 1.9 1.1l.4 2.6h3.9l.4-2.6a8 8 0 0 0 1.9-1.1l2.4.9 2-3.4z"/></svg>
+      <span>Settings</span>
+    </a>
+  </nav>
+  <div id="toast" role="status" hidden></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

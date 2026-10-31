@@ -6,7 +6,11 @@ built yet. Read all of it before starting.
 
 ## Status
 
-- Repo contains only this file and a stub `README.md`. **Next step: Phase 0 below, then build v1.**
+- **Phase 0 done, v1 built and pushed (2026-10-31).** Next: confirm Pages deploy, then v2.
+- Layout: `index.html`, `sw.js`, `manifest.webmanifest`, `css/app.css`, `js/` (`streaks.js` +
+  `model.js` = pure logic, `api.js`, `db.js`, `store.js` = IO, `app.js` = UI), `icons/`
+  (from `tools/make_icons.py`), `tests/` (`npm test` unit, `npm run e2e` Playwright w/ mocked API).
+- Bump `VERSION` in `sw.js` on each release.
 - Owner decisions already made (do not re-ask):
   - Repo is **public**; host on **GitHub Pages**, deployed by a GitHub Actions workflow.
   - **Push directly to `main`.** No PR needed.
@@ -35,7 +39,24 @@ One user (the owner). Installed on iPhone via Safari → Share → Add to Home S
   token either way), so don't build one. Document this in the README.
 - Habitica is reachable from the cloud container (`GET /api/v3/status` → 200).
 
-## Phase 0 — verify real data before building (do this first)
+## Phase 0 findings (2026-10-31, real account)
+
+- Dailies have `streak`, `completed`, `isDue`, `nextDue`, `frequency`, `everyX`, `repeat`,
+  `daysOfMonth`, `weeksOfMonth`, `startDate`, `checklist`, `history`, `yesterDaily`.
+- Daily `history` entries are `{date, value, isDue, completed}`, back to task creation (~70 days seen).
+  **Not one entry per day.** Semantics (verified; reconstruction matches actual `streak` for all dailies):
+  - each check-off writes `completed:true` at check-off time;
+  - cron writes `completed:false` (+`isDue`) **only for dailies not completed**;
+  - a cron entry closes the previous *active* day (any activity triggers cron);
+  - check-offs before that day's cron ("record yesterday's activity") belong to the previous active day.
+  Implemented in `js/streaks.js` (`analyzeHistory`, `historyToDays`).
+- Habits: `up`, `down`, `counterUp`, `counterDown`, `frequency`, history `{date, value, scoredUp, scoredDown}`.
+- User: `preferences.dayStart` (5), `preferences.timezoneOffset` (-330), `lastCron` present;
+  `needsCron` absent → staleness is computed from `lastCron` vs today. `userFields` with dotted
+  paths doesn't actually filter (harmless).
+- Rate-limit headers: limit 30, `X-RateLimit-Reset` is a date string.
+
+## Phase 0 — verify real data before building (done)
 
 Using the env-var credentials, GET-only:
 
