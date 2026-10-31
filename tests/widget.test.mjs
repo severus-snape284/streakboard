@@ -7,14 +7,15 @@ import { scenario } from './fixtures.mjs';
 
 const SRC = fs.readFileSync(new URL('../widgets/streakboard-widget.js', import.meta.url), 'utf8');
 
-function makeEnv({ family, inWidget = true, creds = true, fail = null, param = '', now = null }) {
+function makeEnv({ family, inWidget = true, creds = true, fail = null, param = '', now = null, shortcut, siri = false }) {
   const texts = [];
   const keychain = new Map(creds ? [['streakboard_habitica_user_id', 'u'], ['streakboard_habitica_api_token', 't']] : []);
   const files = new Map();
   const requests = [];
   const clock = now ?? Date.now();
   const today = new Date(clock + 330 * 60000 - 5 * 3600000).toISOString().slice(0, 10);
-  const { user, dailies } = scenario(today);
+  const { user, dailies, habits } = scenario(today);
+  const out = { shortcut: null, spoken: null, posts: [] };
   user.lastCron = new Date(clock - 60000).toISOString();
   // Optionally freeze the script's clock.
   const FakeDate = now == null ? Date : class extends Date {
@@ -51,17 +52,23 @@ function makeEnv({ family, inWidget = true, creds = true, fail = null, param = '
     Request: class {
       constructor(url) { this.url = url; requests.push(this); }
       async loadJSON() {
-        if (fail) { this.response = { statusCode: fail }; return fail === 'network' ? Promise.reject(new Error('offline')) : { success: false, message: 'Unauthorized' }; }
+        if (this.method === 'POST') {
+          out.posts.push(this.url);
+          if (fail === 'post') return { success: false, message: 'Server exploded' };
+          return { success: true, data: { delta: 1 } };
+        }
+        if (fail && fail !== 'post') { this.response = { statusCode: fail }; return fail === 'network' ? Promise.reject(new Error('offline')) : { success: false, message: 'Unauthorized' }; }
         this.response = { statusCode: 200 };
-        return { success: true, data: this.url.includes('/tasks/') ? dailies : user };
+        return { success: true, data: this.url.includes('type=habits') ? habits : this.url.includes('/tasks/') ? dailies : user };
       }
     },
     Alert: class { addTextField() {} addSecureTextField() {} addAction() {} addCancelAction() {} async presentAlert() { return -1; } async presentSheet() { return 0; } textFieldValue() { return ''; } },
-    config: { runsInWidget: inWidget, widgetFamily: family },
-    args: { widgetParameter: param },
-    Script: { setWidget: (w) => { set = w; }, complete: () => {} },
+    config: { runsInWidget: shortcut !== undefined || siri ? false : inWidget, widgetFamily: family, runsWithSiri: siri },
+    args: { widgetParameter: param, shortcutParameter: shortcut },
+    Script: { setWidget: (w) => { set = w; }, complete: () => {}, setShortcutOutput: (v) => { out.shortcut = v; } },
+    Speech: { speak: (t) => { out.spoken = t; } },
   };
-  return { env, texts, files, requests, notif, dailies, user, get widget() { return set; }, setFail: (f) => { fail = f; } };
+  return { env, texts, files, requests, notif, dailies, user, out, get widget() { return set; }, setFail: (f) => { fail = f; } };
 }
 
 async function run(e) {
@@ -175,4 +182,98 @@ test('single-daily widget: matches app logic for best streak and last 7 days', a
   const risk = makeEnv({ family: 'medium', param: 'RISK', now: NOON });
   await run(risk);
   assert.ok(!risk.texts.join(' ').includes('No daily matches'), 'risk keyword is case-insensitive');
+});
+
+// ---------- Siri & Apple Intelligence ----------
+
+test('siri briefing: done/due counts, at-risk, don\'t-miss-twice, milestone nudge, time left, best streak', async () => {
+  const e = makeEnv({ shortcut: 'briefing', now: NOON });
+  await run(e);
+  const t = e.out.shortcut;
+  assert.ok(t.startsWith('Good afternoon.'), t);
+  assert.ok(t.includes("You've done 1 of 5 dailies."), t);
+  assert.ok(t.includes('Floss, 6-day streak, at risk'), t);
+  assert.ok(t.includes('Journal tag, missed last time') || t.includes('Journal <b>tag</b>, missed last time'), t);
+  assert.ok(t.includes('Tick Floss today to reach 7 days.'), t);
+  assert.ok(/\d+ hours?( and \d+ minutes?)? until your day resets/.test(t), t);
+  assert.ok(t.includes('Your best current streak is Read 20 pages at 26 days.'), t);
+  assert.equal(e.widget, null, 'no widget rendered in voice mode');
+  // An empty parameter also means briefing.
+  const e2 = makeEnv({ shortcut: '', now: NOON });
+  await run(e2);
+  assert.ok(e2.out.shortcut.includes('1 of 5'));
+});
+
+test('siri: Run Script without parameter via Siri speaks the briefing', async () => {
+  const e = makeEnv({ siri: true, now: NOON });
+  await run(e);
+  assert.ok(e.out.spoken && e.out.spoken.includes('1 of 5'), e.out.spoken);
+});
+
+test('siri week and tomorrow', async () => {
+  const w = makeEnv({ shortcut: 'week', now: NOON });
+  await run(w);
+  assert.ok(/Over the last 7 days you did \d+ of \d+ due dailies, \d+ percent, with \d+ perfect days?\./.test(w.out.shortcut), w.out.shortcut);
+  assert.ok(w.out.shortcut.includes('Needs work: Journal'), w.out.shortcut);
+  const t = makeEnv({ shortcut: 'tomorrow', now: NOON });
+  for (const d of t.dailies) d.nextDue = [];
+  await run(t);
+  assert.ok(t.out.shortcut.includes("don't have tomorrow's schedule"), t.out.shortcut);
+  const t2 = makeEnv({ shortcut: 'tomorrow', now: NOON });
+  t2.dailies[0].nextDue = ['2026-10-31T18:30:00.000Z']; // local midnight of Nov 1
+  await run(t2);
+  assert.ok(t2.out.shortcut.includes('On Sunday you have 1 daily due: Read 20 pages (26 days).'), t2.out.shortcut);
+});
+
+test('siri tick: dailies by partial name, habits, already done, unknown, failure', async () => {
+  const e = makeEnv({ shortcut: 'tick flo', now: NOON });
+  await run(e);
+  assert.ok(e.out.posts.some((u) => u.endsWith('/tasks/ffff-6/score/up')), e.out.posts.join());
+  assert.ok(e.out.shortcut.includes('Done. Floss is now on a 7-day streak.'), e.out.shortcut);
+  assert.ok(e.out.shortcut.includes("7-day milestone"), e.out.shortcut);
+  assert.ok(e.out.shortcut.includes('3 still due.'), e.out.shortcut);
+
+  const already = makeEnv({ shortcut: 'tick read', now: NOON });
+  await run(already);
+  assert.equal(already.out.posts.length, 0);
+  assert.ok(already.out.shortcut.includes('already done'), already.out.shortcut);
+
+  const habit = makeEnv({ shortcut: 'log gym', now: NOON });
+  await run(habit);
+  assert.ok(habit.out.posts.some((u) => u.endsWith('/tasks/h-2/score/up')));
+  assert.ok(habit.out.shortcut.includes("Logged Gym. That's 2 times this week."), habit.out.shortcut);
+
+  const unknown = makeEnv({ shortcut: 'tick yoga', now: NOON });
+  await run(unknown);
+  assert.equal(unknown.out.posts.length, 0);
+  assert.ok(unknown.out.shortcut.includes("couldn't find a daily or habit called \"yoga\""), unknown.out.shortcut);
+
+  const failing = makeEnv({ shortcut: 'tick stretch', now: NOON, fail: 'post' });
+  await run(failing);
+  assert.ok(failing.out.shortcut.includes("couldn't tick Stretch"), failing.out.shortcut);
+});
+
+test('ask: builds a grounded, read-aloud prompt with compact data', async () => {
+  const e = makeEnv({ shortcut: 'ask which daily am I worst at?', now: NOON });
+  await run(e);
+  const p = e.out.shortcut;
+  assert.ok(p.startsWith('You are the habit coach inside Streakboard'), p.slice(0, 80));
+  assert.ok(p.includes('read aloud by Siri'));
+  assert.ok(p.trim().endsWith('QUESTION\nwhich daily am I worst at?'), p.slice(-80));
+  assert.ok(p.includes('- Meditate | 1 | 7 | due, not done |'), p);
+  assert.ok(p.includes('- Read 20 pages | 26 | 26 | done |'), p);
+  assert.ok(/- Floss \| 6 \| 6 \| due, not done \| [X.\-r?]{13}o \| 100% \(6\/6\) \| 20:\d\d \|/.test(p), p);
+  assert.ok(p.includes('- Gym | weekly | 1'), 'habits included');
+  assert.ok(p.length < 4000, `prompt stays compact (${p.length} chars)`);
+  assert.ok(!p.includes('"u"') && !p.includes('t-token'), 'no credentials in the prompt');
+  // A bare question without the "ask" prefix works too.
+  const bare = makeEnv({ shortcut: 'how am I doing this week?', now: NOON });
+  await run(bare);
+  assert.ok(bare.out.shortcut.trim().endsWith('how am I doing this week?'));
+});
+
+test('voice mode without credentials explains how to sign in', async () => {
+  const e = makeEnv({ shortcut: 'briefing', creds: false, now: NOON });
+  await run(e);
+  assert.ok(e.out.shortcut.includes('run the Streakboard script once'), e.out.shortcut);
 });

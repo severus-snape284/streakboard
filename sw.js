@@ -1,6 +1,6 @@
 // Service worker: caches the app shell so the app opens instantly and offline.
 // Bump VERSION on every release so clients pick up the new shell.
-const VERSION = 'v3.0.0';
+const VERSION = 'v3.1.0';
 const CACHE = `streakboard-${VERSION}`;
 const SHELL = [
   './',

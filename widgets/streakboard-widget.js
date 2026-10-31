@@ -9,6 +9,14 @@
 //   risk           at-risk / due dailies first
 //   <daily name>   a single daily, e.g. "Google" or "read emails" (matches part of the name)
 //
+// Siri & Apple Intelligence: run this script from a Shortcut ("Run Script" action) with a parameter:
+//   briefing (or empty)   spoken status: what's done, what's due, what's at risk, time left
+//   tomorrow              what's due tomorrow
+//   week                  the last 7 days: rate, perfect days, strongest and weakest daily
+//   tick <name>           check off a daily, or +1 a positive habit, by (part of) its name
+//   ask <question>        returns a prompt with your data for the "Use Model" action
+// The reply is the shortcut's output; end the Shortcut with "Show Result" so Siri reads it aloud.
+//
 // Smart reminders: whenever the widget refreshes (or you run the script), it schedules local
 // notifications only if dailies are still due, and clears them once everything is done.
 // Change the times below. Scriptable asks for notification permission the first time.
@@ -237,6 +245,20 @@ async function get(path, uid, tok) {
   return body.data;
 }
 
+async function post(path, uid, tok) {
+  const r = new Request(API + path);
+  r.method = 'POST';
+  r.headers = { 'x-api-user': uid, 'x-api-key': tok, 'x-client': `${uid}-HabiticaStreakDashboard` };
+  r.timeoutInterval = 20;
+  const body = await r.loadJSON();
+  if (!body || !body.success) throw new Error(body?.message || 'Habitica rejected the change');
+  return body.data;
+}
+
+function creds() {
+  return Keychain.contains(KEY_TOKEN) ? { uid: Keychain.get(KEY_UID), tok: Keychain.get(KEY_TOKEN) } : null;
+}
+
 function cachePath() {
   const fm = FileManager.local();
   return [fm, fm.joinPath(fm.documentsDirectory(), CACHE_FILE)];
@@ -249,14 +271,14 @@ async function loadData() {
   const [fm, path] = cachePath();
   try {
     const [user, dailies] = await Promise.all([
-      get('/user?userFields=preferences.dayStart,preferences.timezoneOffset,lastCron', uid, tok),
+      get('/user?userFields=preferences.dayStart,preferences.timezoneOffset,preferences.sleep,lastCron', uid, tok),
       get('/tasks/user?type=dailys', uid, tok),
     ]);
     const slim = {
       at: Date.now(),
       user: { preferences: user.preferences, lastCron: user.lastCron },
       dailies: dailies.map((t) => ({
-        text: t.text, streak: t.streak || 0, isDue: !!t.isDue, completed: !!t.completed,
+        id: t.id, text: t.text, streak: t.streak || 0, isDue: !!t.isDue, completed: !!t.completed, nextDue: t.nextDue || [],
         history: (t.history || []).map((h) => ({ date: h.date, value: h.value, isDue: h.isDue, completed: h.completed })),
       })),
     };
@@ -486,9 +508,261 @@ function errorWidget(msg) {
   return w;
 }
 
+// ---------- Siri & Apple Intelligence ----------
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const weekdayOf = (key) => WEEKDAYS[new Date(key + 'T00:00:00Z').getUTCDay()];
+
+function listJoin(items) {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+function spokenLeft(ms) {
+  const m = Math.max(0, Math.floor(ms / 60000));
+  const h = Math.floor(m / 60), r = m % 60;
+  const hs = h ? `${h} hour${h === 1 ? '' : 's'}` : '';
+  const rs = r ? `${r} minute${r === 1 ? '' : 's'}` : '';
+  return hs && rs ? `${hs} and ${rs}` : hs || rs || 'less than a minute';
+}
+
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+
+/** Habitica time context plus per-daily day maps (same logic as the app). */
+function voiceCtx(data, now) {
+  const tz = data.user.preferences?.timezoneOffset ?? 0;
+  const ds = data.user.preferences?.dayStart ?? 0;
+  const today = data.user.lastCron ? dayKey(Date.parse(data.user.lastCron), tz, ds) : dayKey(now, tz, ds);
+  const a = analyzeHistory(data.dailies, data.user.lastCron, tz, ds);
+  const days = data.dailies.map((t) => historyToDays(t, a, tz, ds));
+  return { tz, ds, today, a, days, s: summarize(data.user, data.dailies, now), resting: !!data.user.preferences?.sleep };
+}
+
+function lastDueOutcome(days, before) {
+  const keys = Object.keys(days).filter((k) => k < before && (days[k] === 'done' || days[k] === 'missed')).sort();
+  return keys.length ? days[keys[keys.length - 1]] : null;
+}
+
+function briefingText(data, now) {
+  const v = voiceCtx(data, now);
+  const { s } = v;
+  const h = new Date(now - v.tz * 60000).getUTCHours(); // your Habitica time zone
+  // Before your custom day start it's still "last night" in Habitica terms.
+  const parts = [`${h < v.ds || h >= 18 ? 'Good evening' : h < 12 ? 'Good morning' : 'Good afternoon'}.`];
+  if (v.resting) parts.push("You're resting in the Inn, so your streaks are safe.");
+  if (s.stale) parts.push(`Habitica hasn't started your new day yet, so anything you tick now still counts for ${weekdayOf(v.today)}.`);
+  if (!s.dueTotal) parts.push('Nothing is due today.');
+  else if (!s.open) parts.push(`Perfect day: all ${s.dueTotal} dailies are done.`);
+  else {
+    parts.push(`You've done ${s.doneDue} of ${s.dueTotal} dailies.`);
+    const open = s.byRisk.filter((t) => t.isDue && !t.completed);
+    const desc = open.slice(0, 4).map((t) => {
+      const twice = lastDueOutcome(v.days[data.dailies.indexOf(t)], v.today) === 'missed';
+      return `${plain(t.text)}${t.streak ? `, ${t.streak}-day streak` : ''}${twice ? ', missed last time' : t.streak >= 3 ? ', at risk' : ''}`;
+    });
+    parts.push(`Still due: ${desc.join('; ')}${open.length > 4 ? `; and ${open.length - 4} more` : ''}.`);
+    const ms = open.find((t) => MILESTONES.includes(t.streak + 1));
+    if (ms) parts.push(`Tick ${plain(ms.text)} today to reach ${ms.streak + 1} days.`);
+    if (s.left != null) parts.push(`${cap(spokenLeft(s.left))} until your day resets.`);
+  }
+  if (s.top) parts.push(`Your best current streak is ${plain(s.top.text)} at ${s.top.streak} days.`);
+  return parts.join(' ');
+}
+
+function dueTomorrow(data, now) {
+  const v = voiceCtx(data, now);
+  const tomorrow = addDays(v.today, 1);
+  const known = data.dailies.some((t) => (t.nextDue || []).length);
+  const list = data.dailies.filter((t) => (t.nextDue || []).some((d) => {
+    const ts = Date.parse(d);
+    return !isNaN(ts) && dayKey(ts, v.tz, 0) === tomorrow;
+  }));
+  return { known, list, tomorrow };
+}
+
+function tomorrowText(data, now) {
+  const { known, list, tomorrow } = dueTomorrow(data, now);
+  if (!known) return "I don't have tomorrow's schedule yet. Open Streakboard once and ask again.";
+  if (!list.length) return `Nothing is due on ${weekdayOf(tomorrow)}. Enjoy the break.`;
+  const names = list.map((t) => `${plain(t.text)}${t.streak ? ` (${t.streak} day${t.streak === 1 ? '' : 's'})` : ''}`);
+  return `On ${weekdayOf(tomorrow)} you have ${list.length} ${list.length === 1 ? 'daily' : 'dailies'} due: ${listJoin(names)}.`;
+}
+
+function weekStats(data, v, from, to) {
+  let done = 0, due = 0;
+  const per = data.dailies.map((t, i) => {
+    let d = 0, m = 0;
+    for (const [k, st] of Object.entries(v.days[i])) {
+      if (k < from || k > to) continue;
+      if (st === 'done') d++; else if (st === 'missed') m++;
+    }
+    done += d; due += d + m;
+    return { t, done: d, missed: m };
+  });
+  const byDay = {};
+  v.days.forEach((dm) => Object.entries(dm).forEach(([k, st]) => {
+    if (k < from || k > to || (st !== 'done' && st !== 'missed')) return;
+    byDay[k] = byDay[k] || { done: 0, missed: 0 };
+    byDay[k][st]++;
+  }));
+  const perfect = Object.values(byDay).filter((x) => x.missed === 0 && x.done > 0).length;
+  return { done, due, per, perfect };
+}
+
+function weekText(data, now) {
+  const v = voiceCtx(data, now);
+  const w = weekStats(data, v, addDays(v.today, -7), addDays(v.today, -1));
+  const prev = weekStats(data, v, addDays(v.today, -14), addDays(v.today, -8));
+  if (!w.due) return "I don't have enough history for the last 7 days yet.";
+  const rate = Math.round((100 * w.done) / w.due);
+  const parts = [`Over the last 7 days you did ${w.done} of ${w.due} due dailies, ${rate} percent, with ${w.perfect} perfect day${w.perfect === 1 ? '' : 's'}.`];
+  if (prev.due) {
+    const p = Math.round((100 * prev.done) / prev.due);
+    parts.push(rate > p ? `That's up from ${p} percent the week before.` : rate < p ? `That's down from ${p} percent the week before.` : 'Same as the week before.');
+  }
+  const strong = w.per.filter((x) => x.done > 0 && x.missed === 0).sort((a, b) => b.done - a.done || b.t.streak - a.t.streak);
+  const weak = w.per.filter((x) => x.missed > 0).sort((a, b) => b.missed - a.missed);
+  if (strong.length) parts.push(`Strongest: ${listJoin(strong.slice(0, 2).map((x) => plain(x.t.text)))}, done every time it was due.`);
+  if (weak.length) parts.push(`Needs work: ${plain(weak[0].t.text)}, missed ${weak[0].missed} time${weak[0].missed === 1 ? '' : 's'}.`);
+  return parts.join(' ');
+}
+
+/** Compact, plain-text facts for the on-device / Private Cloud Compute model. */
+function factsText(data, now, habits = []) {
+  const v = voiceCtx(data, now);
+  const { s } = v;
+  const reset = new Date(nextRollover(v.today, v.tz, v.ds));
+  const sym = { done: 'X', missed: '.', notdue: '-', rest: 'r' };
+  const lines = [];
+  lines.push(`Today is ${weekdayOf(v.today)} ${v.today} (Habitica day; it resets daily at ${v.ds}:00). ${s.stale ? "Habitica hasn't started the new day yet." : `${spokenLeft(s.left)} left today.`}${v.resting ? ' The user is resting in the Inn: streaks are paused and safe.' : ''}`);
+  lines.push(`Today: ${s.doneDue} of ${s.dueTotal} due dailies done.`);
+  lines.push('Dailies (name | current streak | best ever | today | last 14 days oldest to newest: X done, . missed, - not due, r rest, ? no data | done when due over the last 30 days | usual time ticked | weakest weekday):');
+  data.dailies.forEach((t, i) => {
+    const dm = v.days[i];
+    let pattern = '';
+    for (let k = 13; k >= 1; k--) pattern += sym[dm[addDays(v.today, -k)]] || '?';
+    pattern += t.completed ? 'X' : t.isDue ? 'o' : '-';
+    let d30 = 0, m30 = 0;
+    const wd = Array.from({ length: 7 }, () => [0, 0]);
+    for (const [k, st] of Object.entries(dm)) {
+      if (k >= v.today) continue;
+      if (st !== 'done' && st !== 'missed') continue;
+      const wi = new Date(k + 'T00:00:00Z').getUTCDay();
+      wd[wi][1]++; if (st === 'done') wd[wi][0]++;
+      if (k >= addDays(v.today, -30)) { if (st === 'done') d30++; else m30++; }
+    }
+    const weak = wd.map((x, wi) => ({ wi, rate: x[1] >= 2 && x[0] < x[1] ? x[0] / x[1] : 2 })).sort((a, b) => a.rate - b.rate)[0];
+    const mins = (t.history || []).filter((h) => h.completed && !(v.a.cronStart[dayKey(Number(h.date), v.tz, v.ds)] > Number(h.date)))
+      // minutes since the Habitica day start, so 23:00 and 01:00 sort as late evening, not midday
+      .map((h) => { const loc = new Date(Number(h.date) - v.tz * 60000); return (loc.getUTCHours() * 60 + loc.getUTCMinutes() - v.ds * 60 + 1440) % 1440; })
+      .slice(-30).sort((a, b) => a - b);
+    const med = mins.length >= 3 ? (mins[mins.length >> 1] + v.ds * 60) % 1440 : null;
+    const usual = med == null ? 'unknown' : `${String(Math.floor(med / 60)).padStart(2, '0')}:${String(med % 60).padStart(2, '0')}`;
+    const best = bestStreak(Object.fromEntries(Object.entries(dm).filter(([k]) => k < v.today)), t.streak);
+    lines.push(`- ${plain(t.text)} | ${t.streak} | ${best} | ${t.completed ? 'done' : t.isDue ? 'due, not done' : 'not due'} | ${pattern} | ${d30 + m30 ? `${Math.round((100 * d30) / (d30 + m30))}% (${d30}/${d30 + m30})` : 'no data'} | ${usual} | ${weak.rate <= 1 ? WEEKDAYS[weak.wi] : 'none'}`);
+  });
+  const w = weekStats(data, v, addDays(v.today, -7), addDays(v.today, -1));
+  if (w.due) lines.push(`Last 7 closed days: ${w.done}/${w.due} done (${Math.round((100 * w.done) / w.due)}%), ${w.perfect} perfect day${w.perfect === 1 ? '' : 's'}.`);
+  if (habits.length) {
+    lines.push('Positive habits (name | resets | clicks this period):');
+    for (const hb of habits) lines.push(`- ${plain(hb.text)} | ${hb.frequency || 'daily'} | ${hb.counterUp || 0}`);
+  }
+  return lines.join('\n');
+}
+
+function askPrompt(question, facts) {
+  return `You are the habit coach inside Streakboard, a streak tracker for the user's Habitica dailies. Answer the user's question using only the data below. Your answer will be read aloud by Siri, so reply in 2 to 4 short, plain sentences with no lists, markdown or emoji. Be specific (use daily names and numbers), honest and encouraging, and end with one practical suggestion when it fits. If the data can't answer the question, say so briefly.
+
+DATA
+${facts}
+
+QUESTION
+${question}`;
+}
+
+async function fetchHabits(c) {
+  try {
+    return (await get('/tasks/user?type=habits', c.uid, c.tok)).filter((h) => h.up);
+  } catch {
+    return [];
+  }
+}
+
+async function tickText(data, query, now) {
+  const q = query.trim();
+  const c = creds();
+  if (!q) return 'Which daily? Say tick, followed by its name.';
+  if (data.cached) return "I couldn't reach Habitica just now, so nothing was ticked. Try again in a moment.";
+  const v = voiceCtx(data, now);
+  const t = findDaily(data.dailies, q);
+  if (t) {
+    const name = plain(t.text);
+    if (t.completed) return `${name} is already done. You're on a ${t.streak}-day streak.`;
+    try {
+      await post(`/tasks/${encodeURIComponent(t.id)}/score/up`, c.uid, c.tok);
+    } catch (e) {
+      return `I couldn't tick ${name}: ${e.message}.`;
+    }
+    t.completed = true;
+    t.streak += 1;
+    try { const [fm, path] = cachePath(); fm.writeString(path, JSON.stringify({ ...data, cached: undefined })); } catch { /* cache is best-effort */ }
+    const left = data.dailies.filter((x) => x.isDue && !x.completed).length;
+    const parts = [`Done. ${name} is now on a ${t.streak}-day streak.`];
+    if (MILESTONES.includes(t.streak)) parts.push(`That's a ${t.streak}-day milestone. Well done!`);
+    if (v.s.stale) parts.push(`That counts for ${weekdayOf(v.today)}.`);
+    parts.push(left ? `${left} still due.` : "That's everything for today. Perfect day!");
+    return parts.join(' ');
+  }
+  const habits = await fetchHabits(c);
+  const hb = findDaily(habits, q);
+  if (hb) {
+    try {
+      await post(`/tasks/${encodeURIComponent(hb.id)}/score/up`, c.uid, c.tok);
+    } catch (e) {
+      return `I couldn't log ${plain(hb.text)}: ${e.message}.`;
+    }
+    const period = { weekly: 'this week', monthly: 'this month' }[hb.frequency] || 'today';
+    const n = (hb.counterUp || 0) + 1;
+    return `Logged ${plain(hb.text)}. That's ${n} time${n === 1 ? '' : 's'} ${period}.`;
+  }
+  const names = data.dailies.map((x) => plain(x.text));
+  return `I couldn't find a daily or habit called "${q}". Your dailies are ${listJoin(names)}.`;
+}
+
+/** Route a Shortcut/Siri request to a spoken reply. */
+async function voiceReply(param) {
+  const raw = Array.isArray(param) ? param.join(' ') : String(param ?? '');
+  const p = raw.trim();
+  const lower = p.toLowerCase();
+  if (!creds()) return 'Open Scriptable and run the Streakboard script once to sign in to Habitica.';
+  let data;
+  try {
+    data = await loadData();
+  } catch (e) {
+    return `I couldn't load your streaks: ${e.message}.`;
+  }
+  const now = Date.now();
+  if (!data.cached) await syncReminders(planReminders(summarize(data.user, data.dailies, now), now));
+  if (!lower || lower === 'briefing' || lower === 'status' || lower === 'today') return briefingText(data, now);
+  if (lower === 'tomorrow') return tomorrowText(data, now);
+  if (lower === 'week' || lower === 'weekly' || lower === 'review') return weekText(data, now);
+  const m = /^(tick|done|did|log|check)\s+(.*)$/i.exec(p);
+  if (m) return tickText(data, m[2], now);
+  const question = /^ask\s+/i.test(p) ? p.replace(/^ask\s+/i, '') : p;
+  if (lower === 'data') return factsText(data, now, await fetchHabits(creds()));
+  return askPrompt(question, factsText(data, now, await fetchHabits(creds())));
+}
+
 // ---------- main ----------
 
 async function main() {
+  // From Shortcuts ("Run Script" with a parameter) or Siri: reply with text instead of a widget.
+  if (args.shortcutParameter != null || config.runsWithSiri) {
+    const reply = await voiceReply(args.shortcutParameter);
+    Script.setShortcutOutput(reply);
+    if (config.runsWithSiri && args.shortcutParameter == null) Speech.speak(reply);
+    return Script.complete();
+  }
   if (!config.runsInWidget && !Keychain.contains(KEY_TOKEN)) {
     if (!(await askCredentials())) return Script.complete();
   }

@@ -351,6 +351,12 @@ input:focus-visible, .btn:focus-visible, .row-link:focus-visible, .seg button:fo
 .welcome-logo { display: flex; justify-content: center; margin: 28px 0 10px; }
 .welcome-logo img { border-radius: 22px; box-shadow: 0 10px 40px rgba(255, 120, 40, 0.25); }
 
+/* Siri setup */
+.siri details { border-top: 1px solid var(--line); padding: 10px 0 2px; }
+.siri summary { cursor: pointer; min-height: 32px; font-size: 15px; list-style-position: outside; }
+.siri details .steps { margin-top: 10px; }
+.siri code { background: var(--surface-2); padding: 1px 6px; border-radius: 6px; }
+
 /* ---------- detail ---------- */
 .back { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; text-decoration: none; color: var(--flame); font-weight: 600; font-size: 17px; margin-left: -4px; padding: 0 4px; }
 .detail-head { padding: 2px 0 14px; }

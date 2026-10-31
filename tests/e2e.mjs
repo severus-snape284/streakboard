@@ -268,6 +268,7 @@ await page.click('#nav a[data-nav=settings]');
 await page.waitForSelector('[data-action=export]');
 check(await noHScroll(), 'settings: no horizontal scroll');
 check((await page.textContent('body')).includes('Scriptable'), 'settings: widget setup instructions');
+check((await page.textContent('#siri')).includes('Use Model') && (await page.textContent('#siri')).includes('Streakboard tick'), 'settings: Siri & Apple Intelligence setup');
 const widgetSrc = await page.evaluate(() => fetch('widgets/streakboard-widget.js').then((r) => r.text()));
 check(widgetSrc.includes('ListWidget'), 'widget script is served with the app');
 await shot('04-settings');

@@ -11,7 +11,7 @@ import { weeklyColumns, streakLine, sparkColumns } from './charts.js';
 import { describeSchedule } from './model.js';
 import { esc, relTime, fmtDay, pct, FLAME, REFRESH_ICON, CHECK_ICON, PLUS_ICON, ring } from './ui.js';
 
-export const APP_VERSION = '3.0.0';
+export const APP_VERSION = '3.1.0';
 
 const nowMin = (ctx) => minutesIntoDay(Date.now(), ctx.tz, ctx.ds);
 
@@ -516,6 +516,34 @@ export function settingsView(state, setup, creds) {
       </ol>
       <button class="btn" data-action="copy-widget">Copy widget script</button>
       <a class="btn" href="widgets/streakboard-widget.js" target="_blank" rel="noopener">View script</a>
+    </div>
+    <div class="card siri" id="siri">
+      <h2>Siri &amp; Apple Intelligence</h2>
+      <p>Ask Siri about your streaks, tick dailies by voice, or ask anything, answered by Apple Intelligence from your real data. It uses the same Streakboard script as the widget, so update it first: <b>Copy widget script</b> above, then replace the script in Scriptable.</p>
+      <details open><summary><b>1. "Hey Siri, Streakboard"</b>: spoken briefing</summary>
+        <ol class="steps">
+          <li>Open <b>Shortcuts</b> → <b>+</b>.</li>
+          <li>Add the <b>Run Script</b> action (Scriptable). Script: <b>Streakboard</b>. Parameter: <code>briefing</code>. Leave <i>Run In App</i> off.</li>
+          <li>Add <b>Show Result</b> and set it to the script's result. This is what Siri reads out.</li>
+          <li>Name the shortcut <b>Streakboard</b>.</li>
+          <li>Optional: duplicate it with parameter <code>week</code> ("Streakboard week") or <code>tomorrow</code> ("Streakboard tomorrow").</li>
+        </ol></details>
+      <details><summary><b>2. "Hey Siri, Streakboard tick"</b>: check off by voice</summary>
+        <ol class="steps">
+          <li>New shortcut → <b>Ask for Input</b> (Text), prompt: <i>Which daily?</i></li>
+          <li><b>Run Script</b> → Streakboard, Parameter: type <code>tick </code> then insert the <b>Provided Input</b> variable.</li>
+          <li><b>Show Result</b> → script result. Name it <b>Streakboard tick</b>.</li>
+          <li>Say part of a daily's name ("Google") or a positive habit ("Gym" adds +1).</li>
+        </ol></details>
+      <details><summary><b>3. "Hey Siri, Ask Streakboard"</b>: ask anything (Apple Intelligence)</summary>
+        <ol class="steps">
+          <li>New shortcut → <b>Ask for Input</b> (Text), prompt: <i>What do you want to know?</i></li>
+          <li><b>Run Script</b> → Streakboard, Parameter: <code>ask </code> + <b>Provided Input</b>. This builds a prompt containing your streak data.</li>
+          <li>Add <b>Use Model</b> (Apple Intelligence). Model: <b>Private Cloud Compute</b> (or <b>On-Device</b>). Request: the <b>Script Result</b>. Turn off <i>Follow Up</i>.</li>
+          <li><b>Show Result</b> → the model's <b>Response</b>. Name it <b>Ask Streakboard</b>.</li>
+          <li>Try: "Which daily am I worst at?", "Why do my streaks break?", "What should I do tonight?"</li>
+        </ol>
+        <p class="small">On-Device and Private Cloud Compute keep your data with Apple's private AI. Avoid the ChatGPT option unless you're fine with sending your habit data to OpenAI.</p></details>
     </div>
     <div class="card">
       <h2>Taking a break?</h2>

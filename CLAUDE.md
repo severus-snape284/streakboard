@@ -6,7 +6,7 @@ built yet. Read all of it before starting.
 
 ## Status
 
-- **Phase 0 done, v1 through v3.0 built and live (2026-10-31):** https://severus-snape284.github.io/streakboard/
+- **Phase 0 done, v1 through v3.1 built and live (2026-10-31):** https://severus-snape284.github.io/streakboard/
 - v2 + consistency extras shipped (owner asked for "all additions that help me be consistent"): tick
   dailies/checklists with optimistic UI, streak rescue + `POST /cron`, countdown/progress ring,
   don't-miss-twice, perfect days, Insights tab, Habits tab, milestone celebrations, app badge.
@@ -35,6 +35,11 @@ built yet. Read all of it before starting.
   2px line + 10% area, hairline grid, tap tooltips, "Show data" tables); trends in detail + Insights.
   Widget parameter = a daily's name → single-daily widget; widget embeds a copy of the history logic,
   kept equal to the app's by `tests/widget.test.mjs`.
+- v3.1 (owner has an iPhone 17 Pro; asked for Siri + Apple Intelligence): the Scriptable script doubles as a
+  Shortcuts/Siri endpoint (`args.shortcutParameter`): `briefing`, `week`, `tomorrow`, `tick <name>` (dailies, then
+  positive habits; POST score/up), `ask <question>` (returns a compact grounded prompt for the Shortcuts
+  "Use Model" action). Setup steps live in Settings → Siri & Apple Intelligence (Shortcuts can't be imported
+  unsigned, so the owner builds them by hand). Claude-API coach was offered but not chosen (paid service).
 - Verified in Habitica source (`website/server/libs/cron.js`, `common/script/ops/scoreTask.js`):
   GET requests do NOT run cron (only `POST /cron`); score up = streak+1 + history push;
   score down = streak−1 + removes last history entry.

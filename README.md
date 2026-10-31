@@ -78,6 +78,23 @@ less than one widget refresh earlier.
 iOS decides when widgets refresh (roughly every 15 to 30 minutes). Tapping the widget opens Streakboard in Safari,
 because iOS doesn't let widgets open a Home Screen web app directly.
 
+## Siri & Apple Intelligence
+
+The same Scriptable script answers Shortcuts. Add a **Run Script** action (script: Streakboard) with a parameter,
+then **Show Result** so Siri reads the reply aloud:
+
+| Parameter | What Siri says / does |
+|---|---|
+| `briefing` (or empty) | Done vs due today, at-risk and "missed last time" dailies, milestone nudge, time until reset, best streak |
+| `week` | Last 7 days: completion rate vs the week before, perfect days, strongest and weakest daily |
+| `tomorrow` | What's due tomorrow (from Habitica's own schedule) |
+| `tick <name>` | Checks off a daily (or +1 a positive habit) matching part of its name, and confirms the new streak |
+| `ask <question>` | Returns a prompt with your compact streak data. Pipe it into **Use Model** (Apple Intelligence, Private Cloud Compute or On-Device) and show the response |
+
+Full step-by-step setup is in the app under **Settings → Siri & Apple Intelligence**. The replies are built from the
+same history logic as the app (tested in `tests/widget.test.mjs`); only `ask` answers come from an AI model, which can
+occasionally get details wrong.
+
 ## Local development
 
 ```sh
