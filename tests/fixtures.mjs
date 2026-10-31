@@ -58,10 +58,23 @@ export function scenario(today = '2026-10-31') {
     makeDaily('cccc-3', 'Meditate', 'xxxxxxx..x', 'due', today),
     makeDaily('dddd-4', 'Bike clean', 'x------x------x------', 'notdue', today),
     makeDaily('eeee-5', 'Journal <b>tag</b>', '....', 'due', today),
+    makeDaily('ffff-6', 'Floss', 'xxxxxx', 'due', today),
   ];
+  dailies[1].checklist = [{ id: 'cl-1', text: 'Hamstrings', completed: true }, { id: 'cl-2', text: 'Hips', completed: false }];
+  const habit = (id, text, frequency, upDays) => ({
+    id, _id: id, type: 'habit', text, notes: '', up: true, down: false, frequency, value: 1,
+    counterUp: 0, counterDown: 0,
+    history: upDays.map((n) => ({ date: at(add(today, -n), 18), value: 1, scoredUp: 1, scoredDown: 0 })),
+  });
+  const habits = [
+    habit('h-1', 'Drink water', 'daily', [1, 2, 3, 4]),
+    habit('h-2', 'Gym', 'weekly', [0, 7, 14]),
+    { ...habit('h-3', 'Junk food', 'daily', []), up: false, down: true },
+  ];
+  habits[1].counterUp = 1;
   const user = {
     id: 'test-user', lastCron: new Date(at(today, 9)).toISOString(),
     preferences: { dayStart: DAY_START, timezoneOffset: TZ }, profile: { name: 'Tester' },
   };
-  return { user, dailies };
+  return { user, dailies, habits };
 }

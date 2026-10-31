@@ -91,16 +91,16 @@ export function historyToDays(task, { cronStart, activeDays, tzOffsetMin = 0, da
 }
 
 /**
- * Merge Habitica-derived days with locally observed snapshot days.
- * Local snapshots are { day, completed, isDue } as seen at fetch time; a day
- * observed as due-but-incomplete is only a miss once it's in the past.
+ * Merge Habitica-derived days with locally observed snapshots ({ day, completed, isDue }).
+ * For closed days Habitica's history is authoritative and snapshots only fill gaps;
+ * for the current (open) day the latest snapshot wins. A day seen due-but-open is a
+ * miss only once it's closed.
  */
-export function mergeDays(historyDays, snapshots, today) {
+export function mergeDays(historyDays, snapshots, openDay) {
   const days = { ...historyDays };
   for (const s of snapshots) {
-    const status = s.completed ? 'done' : s.isDue ? (s.day < today ? 'missed' : 'due') : 'notdue';
-    const prev = days[s.day];
-    if (!prev || status === 'done' || (prev === 'notdue' && status !== 'notdue')) days[s.day] = status;
+    const status = s.completed ? 'done' : s.isDue ? (s.day < openDay ? 'missed' : 'due') : 'notdue';
+    if (s.day >= openDay || !days[s.day]) days[s.day] = status;
   }
   return days;
 }

@@ -31,16 +31,16 @@ function retryAtFrom(res) {
   return isNaN(t) ? Date.now() + 60000 : t;
 }
 
-async function get(path, creds) {
+async function request(method, path, creds) {
   const blocked = rateBlockedUntil();
   if (blocked > Date.now()) {
     throw new ApiError('Rate limited by Habitica — waiting before retrying.', { status: 429, retryAt: blocked });
   }
   let res;
   try {
-    res = await fetch(BASE + path, { headers: headers(creds), cache: 'no-store' });
+    res = await fetch(BASE + path, { method, headers: headers(creds), cache: 'no-store' });
   } catch {
-    throw new ApiError('Network error — showing cached data.');
+    throw new ApiError(method === 'GET' ? 'Network error — showing cached data.' : 'Network error — change not saved.');
   }
   // Back off pre-emptively when we're about to exhaust the window.
   const remaining = Number(res.headers.get('X-RateLimit-Remaining'));
@@ -61,7 +61,19 @@ async function get(path, creds) {
   return body.data;
 }
 
+const get = (path, creds) => request('GET', path, creds);
+const post = (path, creds) => request('POST', path, creds);
+
 export const fetchUser = (creds) =>
   get('/user?userFields=preferences.dayStart,preferences.timezoneOffset,preferences.sleep,profile.name,lastCron,needsCron', creds);
 
 export const fetchDailies = (creds) => get('/tasks/user?type=dailys', creds);
+export const fetchHabits = (creds) => get('/tasks/user?type=habits', creds);
+
+// Writes — only ever triggered by an explicit tap in the UI.
+export const scoreTask = (creds, taskId, direction) =>
+  post(`/tasks/${encodeURIComponent(taskId)}/score/${direction === 'down' ? 'down' : 'up'}`, creds);
+export const scoreChecklistItem = (creds, taskId, itemId) =>
+  post(`/tasks/${encodeURIComponent(taskId)}/checklist/${encodeURIComponent(itemId)}/score`, creds);
+/** Close the previous Habitica day (what Habitica's "Start my day" does). */
+export const runCron = (creds) => post('/cron', creds);

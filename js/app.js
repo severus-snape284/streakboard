@@ -1,43 +1,21 @@
+// App controller: state, routing, actions, boot.
 import * as store from './store.js';
-import { sortTasks, heroStats, atRisk, statusOf, milestoneFor, nextMilestone, MILESTONES, addDays } from './streaks.js';
-import { describeSchedule } from './model.js';
+import { crossedMilestones, fmtDuration, nextRollover } from './insights.js';
+import { homeView, detailView, insightsView, habitsView, settingsView } from './views.js';
+import { esc, relTime, toast, FLAME } from './ui.js';
 
-const APP_VERSION = '1.0.0';
 const app = document.getElementById('app');
-const FLAME = '<svg class="flame" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5c.9 3.3-1.4 5.2-2.8 7.1C7.9 11.4 7.4 12.9 7.4 14.3c0 3.3 2.3 6.2 4.6 6.2s4.6-2.9 4.6-6.2c0-1.9-.9-3.3-1.8-4.3.2 1.4-.3 2.6-1.2 3.1.3-3.1-.6-6.8-1.6-10.6z"/></svg>';
-const REFRESH_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.2L13 11h7V4l-2.3 2.3z"/></svg>';
 
 const state = {
   view: null,
   loading: false,
   error: null,
   sort: localStorage.getItem('sb.sort') || 'streak',
+  period: Number(localStorage.getItem('sb.period')) || 7,
+  badge: localStorage.getItem('sb.badge') === '1',
   persisted: null,
+  pending: new Set(), // task ids with a write in flight
 };
-
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-
-function relTime(ts) {
-  if (!ts) return 'never';
-  const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 45) return 'just now';
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h} h ago`;
-  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-const fmtDay = (key, opts = { month: 'short', day: 'numeric' }) =>
-  new Date(key + 'T12:00:00Z').toLocaleDateString(undefined, { timeZone: 'UTC', ...opts });
-
-function toast(msg, ms = 2800) {
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.hidden = false;
-  clearTimeout(toast.t);
-  toast.t = setTimeout(() => (el.hidden = true), ms);
-}
 
 // ---------- routing ----------
 
@@ -45,7 +23,7 @@ function route() {
   const h = location.hash.replace(/^#/, '') || '/';
   if (!store.getCreds()) return { name: 'settings', setup: true };
   if (h.startsWith('/t/')) return { name: 'detail', id: decodeURIComponent(h.slice(3)) };
-  if (h === '/settings') return { name: 'settings' };
+  if (['/settings', '/insights', '/habits'].includes(h)) return { name: h.slice(1) };
   return { name: 'home' };
 }
 
@@ -56,210 +34,81 @@ function render() {
     const active = a.dataset.nav === (r.name === 'detail' ? 'home' : r.name);
     if (active) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
-  if (r.name === 'settings') app.innerHTML = settingsView(r.setup);
-  else if (r.name === 'detail') app.innerHTML = detailView(r.id);
-  else app.innerHTML = homeView();
+  if (r.name === 'settings') app.innerHTML = settingsView(state, r.setup, store.getCreds());
+  else if (r.name === 'detail') app.innerHTML = detailView(state, r.id);
+  else if (r.name === 'insights') app.innerHTML = insightsView(state);
+  else if (r.name === 'habits') app.innerHTML = habitsView(state);
+  else app.innerHTML = homeView(state);
   if (r.name === 'detail') {
     const hw = app.querySelector('.heat-wrap');
     if (hw) hw.scrollLeft = hw.scrollWidth;
   }
+  updateBadge();
 }
 
 // Re-render data views only (never wipe a half-filled settings form).
 function rerenderData() {
   if (route().name !== 'settings') render();
-  else updateRelTimes();
+  else tick();
 }
 
-function updateRelTimes() {
+function tick() {
   app.querySelectorAll('[data-rel]').forEach((el) => (el.textContent = relTime(Number(el.dataset.rel))));
-}
-
-// ---------- views ----------
-
-function topbar(title) {
-  const v = state.view;
-  return `<header class="topbar">
-    <h1>${esc(title)}</h1>
-    <div class="updated">
-      ${v ? `<span>Updated <span data-rel="${v.fetchedAt}">${relTime(v.fetchedAt)}</span></span>` : ''}
-      <button class="icon-btn" data-action="refresh" aria-label="Refresh">
-        <span class="${state.loading ? 'spin' : ''}" style="display:inline-flex">${REFRESH_ICON}</span>
-      </button>
-    </div>
-  </header>`;
-}
-
-function notes() {
-  const v = state.view;
-  let out = '';
-  if (state.error) out += `<p class="note err">${esc(state.error)}</p>`;
-  if (v?.user?.preferences?.sleep) out += `<p class="note">You're resting in the Inn — Habitica has paused your dailies, so streaks won't break.</p>`;
-  else if (v?.ctx?.stale) out += `<p class="note">Habitica hasn't started your new day yet. Streaks and today's status update after you next open Habitica.</p>`;
-  return out;
-}
-
-function statusPill(t) {
-  const s = statusOf(t);
-  if (s === 'done') return '<span class="pill done">✓ Done today</span>';
-  if (s === 'due') return atRisk(t) ? '<span class="pill risk">At risk</span>' : '<span class="pill due">Due today</span>';
-  return '<span class="pill">Not due today</span>';
-}
-
-function rowView(t) {
-  const ms = milestoneFor(t.streak);
-  const cls = ['row', statusOf(t)];
-  if (!t.streak) cls.push('zero');
-  if (ms) cls.push('milestone');
-  if (ms && ms === t.streak) cls.push('milestone-hit');
-  return `<li><a class="${cls.join(' ')}" href="#/t/${encodeURIComponent(t.id)}">
-    <div class="row-body">
-      <div class="row-title">${esc(t.text)}</div>
-      <div class="row-meta">${statusPill(t)}${ms ? `<span class="pill ms">${ms}-day</span>` : ''}<span><span class="num">${t.streak}</span> / best <span class="num">${t.best}</span></span></div>
-    </div>
-    <div class="row-streak num" aria-label="${t.streak} day streak">${FLAME}${t.streak}</div>
-  </a></li>`;
-}
-
-function homeView() {
-  const v = state.view;
-  if (!v) {
-    if (state.error) {
-      return `${topbar('Streakboard')}<div class="empty"><h2>Couldn't load your streaks</h2><p>${esc(state.error)}</p>
-        <button class="btn primary" data-action="refresh">Try again</button></div>`;
-    }
-    return `${topbar('Streakboard')}<ul class="list">${'<li class="skel"></li>'.repeat(5)}</ul>`;
+  const ctx = state.view?.ctx;
+  if (ctx && !ctx.stale) {
+    const left = nextRollover(ctx.today, ctx.tz, ctx.ds) - Date.now();
+    app.querySelectorAll('[data-countdown]').forEach((el) => (el.textContent = fmtDuration(left)));
+    if (left <= 0) doRefresh({ quiet: true }); // a new Habitica day may have begun
   }
-  const tasks = v.tasks;
-  if (!tasks.length) {
-    return `${topbar('Streakboard')}${notes()}<div class="empty"><h2>No dailies yet</h2><p>Add dailies in Habitica and they'll show up here.</p></div>`;
+}
+
+function updateBadge() {
+  if (!('setAppBadge' in navigator)) return;
+  const due = state.view?.tasks.filter((t) => t.isDue && !t.completed).length || 0;
+  if (state.badge && due) navigator.setAppBadge(due).catch(() => {});
+  else navigator.clearAppBadge?.().catch(() => {});
+}
+
+// ---------- celebrations ----------
+
+const celebrateQueue = [];
+function celebrate(list) {
+  let seen = [];
+  try { seen = JSON.parse(localStorage.getItem('sb.celebrated') || '[]'); } catch { /* ignore */ }
+  for (const c of list) {
+    const key = `${c.taskId}:${c.m}:${c.day}`;
+    if (seen.includes(key)) continue;
+    seen.push(key);
+    celebrateQueue.push(c);
   }
-  const hero = heroStats(tasks);
-  const risky = sortTasks(tasks.filter(atRisk), 'streak');
-  const sorted = sortTasks(tasks, state.sort);
-  const seg = [['streak', 'Streak'], ['due', 'Due today'], ['name', 'Name']]
-    .map(([k, l]) => `<button data-sort="${k}" aria-pressed="${state.sort === k}">${l}</button>`).join('');
-  return `${topbar('Streakboard')}${notes()}
-    ${risky.length ? `<section class="risk" aria-label="Streaks at risk"><h2>Streak at risk</h2><ul>
-      ${risky.map((t) => `<li><a href="#/t/${encodeURIComponent(t.id)}"><span>${esc(t.text)}</span><span class="num">${FLAME}${t.streak}</span></a></li>`).join('')}
-    </ul></section>` : ''}
-    <section class="hero">
-      <div class="hero-main">
-        <div class="hero-num num">${FLAME}${hero.top ? hero.top.streak : 0}</div>
-        <div class="hero-label">Best current streak<b>${hero.top ? esc(hero.top.text) : 'Start one today'}</b></div>
-      </div>
-      <div class="hero-stats">
-        <div><b class="num">${hero.active}</b><span>active streak${hero.active === 1 ? '' : 's'}</span></div>
-        <div><b class="num">${hero.dueLeft}</b><span>still due today</span></div>
-      </div>
-    </section>
-    <div class="seg" role="group" aria-label="Sort by">${seg}</div>
-    <ul class="list">${sorted.map(rowView).join('')}</ul>`;
+  localStorage.setItem('sb.celebrated', JSON.stringify(seen.slice(-100)));
+  showNextCelebration();
 }
 
-function heatmap(t, ctx) {
-  const today = ctx.cronDay;
-  const keys = Object.keys(t.days).sort();
-  const first = keys[0] || today;
-  // Start on a Monday, at least 17 weeks back.
-  let start = addDays(today, -7 * 17);
-  if (first < start) start = first;
-  const dow = (k) => (new Date(k + 'T00:00:00Z').getUTCDay() + 6) % 7; // Mon=0
-  start = addDays(start, -dow(start));
-  const end = addDays(today, 6 - dow(today));
-  let html = '';
-  let lastMonth = '';
-  for (let wk = start; wk <= end; wk = addDays(wk, 7)) {
-    const month = wk.slice(0, 7);
-    const label = month !== lastMonth ? fmtDay(wk, { month: 'short' }) : '';
-    lastMonth = month;
-    html += `<span class="m">${label}</span>`;
-    for (let d = 0; d < 7; d++) {
-      const k = addDays(wk, d);
-      const st = k > today ? 'future' : t.days[k] || '';
-      const title = k > today ? '' : `${fmtDay(k)}: ${({ done: 'done', missed: 'missed', notdue: 'not due', due: 'due, not done yet' })[st] || 'no data'}`;
-      html += `<i class="${st}${k === today ? ' today' : ''}" title="${esc(title)}"></i>`;
-    }
+function showNextCelebration() {
+  const el = document.getElementById('celebrate');
+  if (!el.hidden || !celebrateQueue.length) return;
+  const c = celebrateQueue.shift();
+  const words = { 7: 'One full week.', 21: 'Three weeks: this is becoming a habit.', 30: 'A whole month.', 66: '66 days: the average time for a habit to stick.', 100: 'Triple digits.', 365: 'A full year. Incredible.' };
+  el.innerHTML = `<div class="celebrate-card" role="dialog" aria-label="Milestone reached">
+    <div class="burst">${FLAME}</div>
+    <div class="celebrate-num num">${c.m}</div>
+    <div class="celebrate-sub">day streak</div>
+    <p><b>${esc(c.text)}</b></p>
+    <p class="muted">${words[c.m] || ''}</p>
+    <button class="btn primary" data-action="dismiss-celebration">Keep going</button>
+  </div>`;
+  el.hidden = false;
+}
+
+document.getElementById('celebrate').addEventListener('click', (e) => {
+  if (e.target.closest('[data-action=dismiss-celebration]') || e.target.id === 'celebrate') {
+    e.currentTarget.hidden = true;
+    showNextCelebration();
   }
-  return `<div class="heat-wrap"><div class="heat" role="img" aria-label="Completion calendar">${html}</div></div>
-    <div class="legend">
-      <span><i style="background:var(--cell-done)"></i>Done</span>
-      <span><i style="background:var(--cell-missed)"></i>Missed</span>
-      <span><i style="background:var(--cell-notdue)"></i>Not due</span>
-      <span><i style="background:var(--cell-empty)"></i>No data</span>
-    </div>`;
-}
+});
 
-function detailView(id) {
-  const v = state.view;
-  const t = v?.tasks.find((x) => x.id === id);
-  if (!t) return `<a class="back" href="#/">‹ Streaks</a><div class="empty"><h2>Daily not found</h2><p>It may have been deleted in Habitica.</p></div>`;
-  const next = nextMilestone(t.streak);
-  const prevMs = milestoneFor(t.streak);
-  const pct = next ? Math.round(((t.streak - prevMs) / (next - prevMs)) * 100) : 100;
-  const rate = t.rate == null ? '—' : `${Math.round(t.rate * 100)}%`;
-  const reached = MILESTONES.filter((m) => t.best >= m);
-  return `<a class="back" href="#/">‹ Streaks</a>
-    <div class="detail-head"><h1>${esc(t.text)}</h1></div>
-    ${notes()}
-    <div class="detail-hero">
-      <div class="big num">${FLAME}${t.streak}</div>
-      <div class="side">${statusPill(t)}<div class="muted" style="margin-top:6px;font-size:14px">${esc(describeSchedule(t))}</div></div>
-    </div>
-    <div class="card">
-      ${next ? `<div style="display:flex;justify-content:space-between;font-size:14px"><span class="muted">Next milestone</span><span><b class="num">${next - t.streak}</b> <span class="muted">to go → ${next} days</span></span></div>
-        <div class="progress"><i style="width:${pct}%"></i></div>` : `<div style="font-size:14px">Past every milestone. Legendary.</div>`}
-      ${reached.length ? `<div class="row-meta" style="margin-top:12px"><span>Milestones reached:</span>${reached.map((m) => `<span class="pill ms">${m}-day</span>`).join('')}</div>` : ''}
-    </div>
-    <div class="stats">
-      <div><b class="num">${t.best}</b><span>Best streak</span></div>
-      <div><b class="num">${t.completions}</b><span>Completions on record</span></div>
-      <div><b class="num">${rate}</b><span>Done when due</span></div>
-      <div><b class="num">${t.breaks.length}</b><span>Streak breaks</span></div>
-    </div>
-    <div class="card"><h2>History</h2>${heatmap(t, v.ctx)}</div>
-    <div class="card"><h2>Streak breaks</h2>
-      ${t.breaks.length ? `<ul class="breaks">${t.breaks.map((b) => `<li><span>${fmtDay(b.day, { month: 'short', day: 'numeric', year: 'numeric' })}</span><span class="muted">lost a <b class="num">${b.lost}</b>-day streak</span></li>`).join('')}</ul>`
-        : '<p>No breaks on record.</p>'}
-    </div>
-    ${t.notes ? `<div class="card"><h2>Notes</h2><p style="white-space:pre-wrap">${esc(t.notes)}</p></div>` : ''}`;
-}
-
-function settingsView(setup) {
-  const c = store.getCreds();
-  return `${setup ? `<header class="topbar"><h1>Welcome to Streakboard</h1></header>
-      <p class="muted">Your Habitica streaks, streak-first. Enter your Habitica API credentials to start — they're stored only on this device and sent only to habitica.com.</p>`
-    : '<header class="topbar"><h1>Settings</h1></header>'}
-    <form class="card" id="creds-form" autocomplete="off">
-      <h2>Habitica account</h2>
-      <p>Find these in Habitica → Settings → Site Data → API.</p>
-      <label for="uid">User ID</label>
-      <input type="text" id="uid" name="userId" inputmode="text" autocapitalize="off" spellcheck="false" value="${esc(c?.userId || '')}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required>
-      <label for="tok">API token</label>
-      <div class="field">
-        <input type="password" id="tok" name="apiToken" autocapitalize="off" spellcheck="false" value="${esc(c?.apiToken || '')}" placeholder="API token" required>
-        <button type="button" class="icon-btn" data-action="toggle-token" aria-label="Show token" style="border:1px solid var(--line)">👁</button>
-      </div>
-      <div style="margin-top:14px"><button class="btn primary" type="submit">${c ? 'Save & test' : 'Connect'}</button></div>
-    </form>
-    ${setup ? '' : `
-    <div class="card">
-      <h2>Backup</h2>
-      <p>Streak history and best streaks live only on this device. iOS can clear website data, so export a backup now and then.</p>
-      <button class="btn" data-action="export">Export backup (JSON)</button>
-      <button class="btn" data-action="import">Import backup</button>
-      <input type="file" id="import-file" accept="application/json,.json" hidden>
-      <p style="margin:12px 0 0;font-size:13px">Persistent storage: ${state.persisted === true ? 'granted' : state.persisted === false ? 'not granted (export backups)' : 'unknown'}</p>
-    </div>
-    <div class="card">
-      <h2>Account</h2>
-      <button class="btn danger" data-action="logout">Log out &amp; clear credentials</button>
-      <button class="btn danger" data-action="wipe">Delete local streak history</button>
-    </div>
-    <p class="muted" style="text-align:center;font-size:12px">Streakboard ${APP_VERSION} · not affiliated with Habitica</p>`}`;
-}
-
-// ---------- actions ----------
+// ---------- data ----------
 
 async function doRefresh({ force = false, quiet = false } = {}) {
   const creds = store.getCreds();
@@ -267,11 +116,15 @@ async function doRefresh({ force = false, quiet = false } = {}) {
   state.loading = true;
   if (!quiet) rerenderData();
   try {
-    const v = await store.refresh(creds, { force });
-    if (v) { state.view = v; state.error = null; }
+    const r = await store.refresh(creds, { force });
+    if (r) {
+      state.view = r.view;
+      state.error = null;
+      if (r.celebrations.length) celebrate(r.celebrations);
+    }
   } catch (e) {
     state.error = e.retryAt
-      ? `Habitica rate limit reached — try again after ${new Date(e.retryAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`
+      ? `Habitica rate limit reached. Try again after ${new Date(e.retryAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`
       : e.message || 'Something went wrong.';
     if (e.status === 401) state.error += ' Check your credentials in Settings.';
   } finally {
@@ -280,18 +133,119 @@ async function doRefresh({ force = false, quiet = false } = {}) {
   }
 }
 
+// After writes, pull the authoritative state from Habitica once things settle.
+let syncTimer;
+function scheduleSync() {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => doRefresh({ force: true, quiet: true }), 2500);
+}
+
+/** Optimistic write: patch locally, call Habitica, roll back on failure. */
+async function optimistic(kind, id, apply, revert, call) {
+  const creds = store.getCreds();
+  if (!creds || state.pending.has(id)) return false;
+  state.pending.add(id);
+  state.view = (await store.patchLocal(kind, id, apply)) || state.view;
+  render();
+  try {
+    await call(creds);
+    scheduleSync();
+    return true;
+  } catch (e) {
+    state.view = (await store.patchLocal(kind, id, revert)) || state.view;
+    toast(e.message || 'Could not save. Change undone.', 4000);
+    return false;
+  } finally {
+    state.pending.delete(id);
+    render();
+  }
+}
+
+async function toggleDaily(id) {
+  const t = state.view?.tasks.find((x) => x.id === id);
+  if (!t) return;
+  const up = !t.completed;
+  if (!up && !confirm(`Mark "${t.text}" as not done? This lowers its streak by one.`)) return;
+  const before = { completed: t.completed, streak: t.streak };
+  const ok = await optimistic('daily', id,
+    (it) => { it.completed = up; it.streak = Math.max(0, it.streak + (up ? 1 : -1)); },
+    (it) => { it.completed = before.completed; it.streak = before.streak; },
+    (creds) => store.scoreTask(creds, id, up ? 'up' : 'down'));
+  if (ok && up) {
+    const day = state.view.ctx.cronDay;
+    celebrate(crossedMilestones(before.streak, before.streak + 1).map((m) => ({ taskId: id, text: t.text, m, day })));
+  }
+}
+
+function toggleChecklist(id, itemId) {
+  const flip = (it) => { const c = it.checklist.find((x) => x.id === itemId); if (c) c.completed = !c.completed; };
+  return optimistic('daily', id, flip, flip, (creds) => store.scoreChecklistItem(creds, id, itemId));
+}
+
+function plusHabit(id) {
+  const now = Date.now();
+  return optimistic('habit', id,
+    (h) => { h.counterUp = (h.counterUp || 0) + 1; h.history = [...(h.history || []), { date: now, value: h.value, scoredUp: 1, scoredDown: 0 }]; },
+    (h) => { h.counterUp = Math.max(0, (h.counterUp || 1) - 1); h.history = (h.history || []).filter((x) => x.date !== now); },
+    (creds) => store.scoreTask(creds, id, 'up'));
+}
+
+async function startNewDay() {
+  const v = state.view;
+  const open = v.tasks.filter((t) => t.isDue && !t.completed);
+  const msg = open.length
+    ? `Start your new day? ${open.length} unticked due daily${open.length === 1 ? '' : 's'} (${open.map((t) => t.text).slice(0, 3).join(', ')}${open.length > 3 ? '…' : ''}) will count as missed.`
+    : 'Start your new day?';
+  if (!confirm(msg)) return;
+  try {
+    await store.runCron(store.getCreds());
+    toast('New day started');
+  } catch (e) {
+    toast(e.message || 'Could not start the new day', 4000);
+  }
+  doRefresh({ force: true });
+}
+
+async function toggleBadge() {
+  if (!state.badge) {
+    // iOS only shows badges for installed PWAs with notification permission.
+    if ('Notification' in window && Notification.permission !== 'granted') {
+      const p = await Notification.requestPermission().catch(() => 'denied');
+      if (p !== 'granted') { toast('Badge needs notification permission'); return; }
+    }
+    state.badge = true;
+  } else {
+    state.badge = false;
+  }
+  localStorage.setItem('sb.badge', state.badge ? '1' : '0');
+  render();
+  toast(state.badge ? 'Badge on' : 'Badge off');
+}
+
+// ---------- events ----------
+
 app.addEventListener('click', async (ev) => {
   const sortBtn = ev.target.closest('[data-sort]');
   if (sortBtn) {
     state.sort = sortBtn.dataset.sort;
     localStorage.setItem('sb.sort', state.sort);
-    render();
-    return;
+    return render();
+  }
+  const perBtn = ev.target.closest('[data-period]');
+  if (perBtn) {
+    state.period = Number(perBtn.dataset.period);
+    localStorage.setItem('sb.period', String(state.period));
+    return render();
   }
   const btn = ev.target.closest('[data-action]');
   if (!btn) return;
-  const action = btn.dataset.action;
+  const { action, id } = btn.dataset;
   if (action === 'refresh') doRefresh({ force: true });
+  else if (action === 'toggle') toggleDaily(id);
+  else if (action === 'checklist') toggleChecklist(id, btn.dataset.item);
+  else if (action === 'habit') plusHabit(id);
+  else if (action === 'cron') startNewDay();
+  else if (action === 'badge') toggleBadge();
   else if (action === 'toggle-token') {
     const i = document.getElementById('tok');
     i.type = i.type === 'password' ? 'text' : 'password';
@@ -300,6 +254,7 @@ app.addEventListener('click', async (ev) => {
   else if (action === 'logout') {
     if (!confirm('Log out and remove your Habitica credentials from this device? Your local streak history is kept.')) return;
     store.clearCreds();
+    navigator.clearAppBadge?.().catch(() => {});
     location.hash = '#/settings';
     render();
   } else if (action === 'wipe') {
@@ -409,7 +364,6 @@ async function boot() {
   store.requestPersistence().then((p) => { state.persisted = p; }).catch(() => {});
   if (store.getCreds()) doRefresh({ force: true, quiet: !!state.view });
 
-  // Refresh on return to the app when data is older than a few minutes; tick relative times.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && (!state.view || Date.now() - state.view.fetchedAt > store.AUTO_REFRESH_MS)) {
       doRefresh({ quiet: true });
@@ -418,13 +372,12 @@ async function boot() {
   setInterval(() => {
     if (document.visibilityState !== 'visible') return;
     if (state.view && Date.now() - state.view.fetchedAt > store.AUTO_REFRESH_MS) doRefresh({ quiet: true });
-    else updateRelTimes();
+    else tick();
   }, 30000);
 
   if ('serviceWorker' in navigator) {
     const hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('SW registration failed', e));
-    // A new version took over: reload once so the new shell is used.
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (hadController && !boot.reloaded) { boot.reloaded = true; location.reload(); }
     });

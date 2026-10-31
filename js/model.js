@@ -1,4 +1,5 @@
 // Pure data model: turns API responses + local records into what the UI renders.
+import { crossedMilestones } from './insights.js';
 import {
   dayKey, isCronStale, analyzeHistory, historyToDays, mergeDays,
   reconstructStreaks, daysBetween,
@@ -10,8 +11,14 @@ const KEEP = ['id', 'text', 'notes', 'streak', 'completed', 'isDue', 'nextDue', 
 export function slimTask(t) {
   const out = {};
   for (const k of KEEP) if (k in t) out[k] = t[k];
-  out.checklist = (t.checklist || []).map((c) => ({ completed: !!c.completed }));
+  out.checklist = (t.checklist || []).map((c) => ({ id: c.id, text: c.text, completed: !!c.completed }));
   return out;
+}
+
+export function slimHabit(h) {
+  const { id, text, notes, up, down, counterUp, counterDown, frequency, history, value } = h;
+  return { id, text, notes, up, down, counterUp, counterDown, frequency, value,
+    history: (history || []).map(({ date, value: v, scoredUp, scoredDown }) => ({ date, value: v, scoredUp, scoredDown })) };
 }
 
 /** Habitica's tz/dayStart, plus the "current" Habitica day (the day the last cron opened). */
@@ -37,7 +44,10 @@ function unionDays(a = {}, b = {}) {
  */
 export function updateObserved(prev, task, historyDays, day) {
   const o = prev ? { ...prev } : { taskId: task.id, maxStreak: 0, breaks: [], days: {} };
-  o.days = unionDays(o.days, historyDays);
+  // The current day is still mutable (unticking deletes its history entry), so only
+  // accumulate closed days; the current day comes from the latest snapshot.
+  const closed = Object.fromEntries(Object.entries(historyDays).filter(([k]) => k < day));
+  o.days = unionDays(o.days, closed);
   if (task.streak > o.maxStreak) { o.maxStreak = task.streak; o.maxDay = day; }
   if (o.lastStreak > 0 && task.streak < o.lastStreak) {
     if (!o.breaks.some((b) => b.day === day)) o.breaks = [...o.breaks, { day, lost: o.lastStreak, source: 'observed' }];
@@ -68,12 +78,17 @@ export function ingest(user, dailies, observedList, now = Date.now()) {
   const prev = new Map(observedList.map((o) => [o.taskId, o]));
   const snapshots = [];
   const observed = [];
+  const celebrations = [];
   for (const t of dailies) {
+    const before = prev.get(t.id);
+    if (before && before.lastStreak != null) {
+      for (const m of crossedMilestones(before.lastStreak, t.streak)) celebrations.push({ taskId: t.id, text: t.text, m, day: ctx.cronDay });
+    }
     const hd = historyToDays(t, analysis);
     observed.push(updateObserved(prev.get(t.id), t, hd, ctx.cronDay));
     snapshots.push({ taskId: t.id, day: ctx.cronDay, completed: !!t.completed, isDue: !!t.isDue, streak: t.streak, ts: now });
   }
-  return { snapshots, observed };
+  return { snapshots, observed, celebrations };
 }
 
 /** Breaks from reconstruction and from observation, de-duplicated (observation lags by a day or two). */
@@ -109,7 +124,7 @@ export function buildView(data, snapshots, observedList, now = Date.now()) {
       rate: recon.dueDays ? recon.completions / recon.dueDays : null,
     };
   });
-  return { ctx, user: data.user, fetchedAt: data.fetchedAt, tasks };
+  return { ctx, user: data.user, fetchedAt: data.fetchedAt, tasks, habits: data.habits || [] };
 }
 
 const DOW = [['su', 'Sun'], ['m', 'Mon'], ['t', 'Tue'], ['w', 'Wed'], ['th', 'Thu'], ['f', 'Fri'], ['s', 'Sat']];

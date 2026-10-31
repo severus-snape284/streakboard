@@ -8,6 +8,15 @@ Keep using the official Habitica app to check things off. Streakboard is the sco
 - A "streak at risk" banner for dailies with a streak of 3 or more that are due today and not done yet
 - A best-streak record that goes back through Habitica's history (not just from install day), plus a history of streak breaks
 - A detail page per daily with a calendar heatmap, stats and milestone progress (7 / 21 / 30 / 66 / 100 / 365)
+- **Tick dailies off right in Streakboard** (and checklist items). Updates instantly, is undone if Habitica rejects it, and asks before unticking
+- **Streak rescue**: when Habitica's new day hasn't started yet, ticks still count for yesterday. Tick what you did, then tap **Start my new day**
+- **Time left today** countdown and a progress ring of today's due dailies
+- **"Don't miss twice"**: highlights dailies you missed the last time they were due
+- **Perfect days**: days when every due daily got done, plus a perfect-day streak
+- **Insights tab**: 7 / 30-day completion rate per daily (weakest first), trend vs the previous period, weakest weekday
+- **Habits tab**: positive habits with a +1 button and day/week/month streaks (per the habit's reset period)
+- **Milestone celebrations** at 7, 21, 30, 66, 100 and 365 days
+- Optional **app icon badge** with the number of dailies still due (iOS 16.4+, needs notification permission)
 - Pull-to-refresh, opens offline, last-updated timestamp
 - Export / Import a JSON backup
 
@@ -69,16 +78,18 @@ either way. It would just add a server to run and one more party that sees your 
 
 ## Known limitations
 
-- **Streaks only update after Habitica's cron.** Cron runs when you next use Habitica on a new day
-  (after your custom day start). Until then, "today" still shows yesterday's state. Streakboard shows a
-  note when cron is pending.
+- **Streaks only update after Habitica's cron** (its daily rollover). Opening Streakboard never triggers
+  cron: only the official apps or Streakboard's **Start my new day** button do. Until cron runs, Streakboard
+  shows the previous day's state, and ticks count for that day.
+- **Writes are real.** Ticking in Streakboard changes your Habitica account, including gold, XP and
+  streak bonuses, exactly as ticking in the official app would.
 - **iOS storage eviction.** iOS can delete website data, especially for PWAs you haven't opened in weeks.
   Streakboard asks for persistent storage, but iOS may ignore the request. Use **Settings → Export backup**
   now and then, and **Import** to restore. Your current streaks always come back from Habitica, but the
   best and break history kept on this device could be lost.
 - **History has limits.** Habitica's history only covers days you used it, so days you didn't open
   Habitica show as "no data". Very old history may be compressed and lose its completion details.
-- **Rate limits.** Habitica allows about 30 requests a minute. Streakboard makes 2 requests per refresh:
+- **Rate limits.** Habitica allows about 30 requests a minute. Streakboard makes 3 requests per refresh:
   on open, on pull-to-refresh, and at most every 5 minutes while open. It backs off on `429` using
   `Retry-After` / `X-RateLimit-Reset`.
 - **iOS PWA restrictions.** No background refresh. Web Push needs iOS 16.4+ and isn't implemented.

@@ -6,9 +6,18 @@ built yet. Read all of it before starting.
 
 ## Status
 
-- **Phase 0 done, v1 built and pushed (2026-10-31).** Next: confirm Pages deploy, then v2.
-- Layout: `index.html`, `sw.js`, `manifest.webmanifest`, `css/app.css`, `js/` (`streaks.js` +
-  `model.js` = pure logic, `api.js`, `db.js`, `store.js` = IO, `app.js` = UI), `icons/`
+- **Phase 0 done, v1 + v2 built and pushed (2026-10-31).** Pages deploy needs the owner to set
+  Settings → Pages → Source = GitHub Actions (first run failed with "Get Pages site failed").
+- v2 + consistency extras shipped (owner asked for "all additions that help me be consistent"): tick
+  dailies/checklists with optimistic UI, streak rescue + `POST /cron`, countdown/progress ring,
+  don't-miss-twice, perfect days, Insights tab, Habits tab, milestone celebrations, app badge.
+  Web Push reminders were skipped: they need a push server.
+- Verified in Habitica source (`website/server/libs/cron.js`, `common/script/ops/scoreTask.js`):
+  GET requests do NOT run cron (only `POST /cron`); score up = streak+1 + history push;
+  score down = streak−1 + removes last history entry.
+- Layout: `index.html`, `sw.js`, `manifest.webmanifest`, `css/app.css`, `js/` (`streaks.js`,
+  `model.js`, `insights.js` = pure logic; `api.js`, `db.js`, `store.js` = IO; `views.js`, `ui.js`,
+  `app.js` = UI), `icons/`
   (from `tools/make_icons.py`), `tests/` (`npm test` unit, `npm run e2e` Playwright w/ mocked API).
 - Bump `VERSION` in `sw.js` on each release.
 - Owner decisions already made (do not re-ask):

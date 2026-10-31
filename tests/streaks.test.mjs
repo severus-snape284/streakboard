@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as s from '../js/streaks.js';
 import { ingest, buildView, mergeObserved, describeSchedule } from '../js/model.js';
+import * as I from '../js/insights.js';
 import { scenario, makeDaily, TZ, DAY_START } from './fixtures.mjs';
 
 const NOW = Date.parse('2026-10-31T16:00:00Z'); // 21:30 local
@@ -115,4 +116,54 @@ test('sorting, hero, risk, milestones', () => {
 test('schedule description', () => {
   assert.equal(describeSchedule({ frequency: 'daily', everyX: 3 }), 'Every 3 days');
   assert.equal(describeSchedule({ frequency: 'weekly', everyX: 1, repeat: { su: true } }), 'Weekly · Sun');
+});
+
+test('insights: never miss twice, perfect days, period stats, weekdays', () => {
+  const today = '2026-10-31';
+  const t1 = { id: 'a', isDue: true, completed: false, days: { '2026-10-28': 'done', '2026-10-29': 'missed', '2026-10-30': 'notdue', '2026-10-31': 'due' } };
+  const t2 = { id: 'b', isDue: true, completed: true, days: { '2026-10-28': 'done', '2026-10-29': 'done', '2026-10-30': 'done', '2026-10-31': 'done' } };
+  assert.equal(I.missedLastTime(t1, today), true);
+  assert.equal(I.missedLastTime(t2, today), false);
+  const roll = I.dayRollup([t1, t2], today);
+  assert.equal(roll['2026-10-29'].perfect, false);
+  assert.equal(roll['2026-10-30'].perfect, true);
+  assert.equal(roll['2026-10-31'].perfect, false); // t1 still open today
+  assert.deepEqual(I.perfectStreak(roll, today), { current: 1, best: 1 });
+  const p = I.periodStats([t1, t2], today, 7);
+  assert.equal(p.done, 5);
+  assert.equal(p.due, 6);
+  const wd = I.weekdayStats([t1.days, t2.days]);
+  assert.equal(wd[I.weekdayIndex('2026-10-29')].due, 2);
+  assert.equal(I.weakestWeekday(wd).i, I.weekdayIndex('2026-10-29'));
+});
+
+test('insights: rollover time and milestones crossed', () => {
+  // dayStart 5 in UTC+5:30 → next rollover 2026-11-01 05:00 local = 2026-10-31T23:30Z
+  assert.equal(new Date(I.nextRollover('2026-10-31', TZ, DAY_START)).toISOString(), '2026-10-31T23:30:00.000Z');
+  assert.deepEqual(I.crossedMilestones(6, 7), [7]);
+  assert.deepEqual(I.crossedMilestones(7, 8), []);
+  assert.deepEqual(I.crossedMilestones(0, 30), [7, 21, 30]);
+  assert.equal(I.fmtDuration(3 * 3600000 + 5 * 60000), '3h 5m');
+});
+
+test('habit streaks by reset period', () => {
+  const { habits } = scenario('2026-10-31');
+  const water = I.habitStats(habits[0], TZ, DAY_START, '2026-10-31');
+  assert.equal(water.thisPeriod, 0);
+  assert.equal(water.streak, 4); // yesterday back 4 days; today not yet
+  const gym = I.habitStats(habits[1], TZ, DAY_START, '2026-10-31');
+  assert.equal(gym.unit, 'week');
+  assert.equal(gym.thisPeriod, 1);
+  assert.equal(gym.streak, 3);
+});
+
+test('unticking today is not remembered from history', () => {
+  const { user, dailies } = scenario();
+  let { observed, snapshots } = ingest(user, dailies, [], NOW);
+  const t = structuredClone(dailies);
+  const read = t.find((d) => d.text === 'Read 20 pages');
+  read.history.pop(); read.completed = false; read.streak -= 1; // Habitica deletes the entry on untick
+  ({ observed, snapshots } = ingest(user, t, observed, NOW + 60000));
+  const v = buildView({ user, dailies: t, fetchedAt: NOW }, snapshots, observed, NOW + 60000);
+  assert.equal(v.tasks.find((x) => x.text === 'Read 20 pages').days['2026-10-31'], 'due');
 });
