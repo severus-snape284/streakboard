@@ -62,6 +62,7 @@ function statusPill(t, ctx) {
   const d = dayLabel(ctx);
   if (s === 'done') return `<span class="pill done">✓ Done ${esc(d)}</span>`;
   if (s === 'due') {
+    if (ctx.resting) return `<span class="pill due">Due ${esc(d)}</span>`;
     if (missedLastTime(t, ctx.cronDay)) return '<span class="pill risk">Don\'t miss twice</span>';
     if (atRisk(t)) return '<span class="pill risk">At risk</span>';
     if (!ctx.stale && pastUsualTime(t, nowMin(ctx))) return `<span class="pill late">Usually done by ${esc(fmtClock(t.usual, ctx.ds))}</span>`;
@@ -122,7 +123,7 @@ export function homeView(state) {
   const doneDue = tasks.filter((t) => t.isDue && t.completed).length;
   const perfect = perfectStreak(dayRollup(tasks, ctx.cronDay), ctx.cronDay);
   // Streaks can't break while resting in the Inn, so skip the warnings then.
-  const resting = !!v.user?.preferences?.sleep;
+  const resting = ctx.resting;
   const twice = resting ? [] : sortTasks(tasks.filter((t) => missedLastTime(t, ctx.cronDay)), 'streak');
   const risky = resting ? [] : sortTasks(tasks.filter((t) => atRisk(t) && !missedLastTime(t, ctx.cronDay)), 'streak');
   const left = ctx.stale ? null : nextRollover(ctx.today, ctx.tz, ctx.ds) - Date.now();

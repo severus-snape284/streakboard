@@ -27,7 +27,7 @@ export function timeCtx(user, now = Date.now()) {
   const ds = user?.preferences?.dayStart ?? 0;
   const today = dayKey(now, tz, ds);
   const cronDay = user?.lastCron ? dayKey(Date.parse(user.lastCron), tz, ds) : today;
-  return { tz, ds, today, cronDay, stale: !!user?.needsCron || isCronStale(user?.lastCron, now, tz, ds) };
+  return { tz, ds, today, cronDay, resting: !!user?.preferences?.sleep, stale: !!user?.needsCron || isCronStale(user?.lastCron, now, tz, ds) };
 }
 
 const RANK = { done: 4, missed: 3, rest: 2, due: 1, notdue: 0 };

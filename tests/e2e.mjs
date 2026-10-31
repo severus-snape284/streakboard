@@ -265,7 +265,7 @@ check(posts.some((p) => p.endsWith('/user/sleep')), 'Rest in the Inn sends POST 
 await page.click('#nav a[data-nav=home]');
 await page.waitForSelector('.rescue.rest');
 check((await page.textContent('.rescue.rest')).includes('Resting in the Inn'), 'home shows resting banner');
-check(await page.locator('.risk').count() === 0, 'no streak warnings while resting');
+check(await page.locator('section.risk, .pill.risk').count() === 0, 'no streak warnings while resting');
 await shot('04b-inn');
 page.once('dialog', (d) => d.accept());
 await page.click('.rescue.rest [data-action=sleep]');
